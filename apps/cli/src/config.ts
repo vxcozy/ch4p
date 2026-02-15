@@ -100,6 +100,12 @@ export function getDefaultConfig(): Ch4pConfig {
       observers: ['console'],
       logLevel: 'info',
     },
+    skills: {
+      enabled: true,
+      paths: ['~/.ch4p/skills', '.ch4p/skills', '.agents/skills'],
+      autoLoad: true,
+      contextBudget: 16000,
+    },
   };
 }
 

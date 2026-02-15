@@ -209,6 +209,41 @@ Gateway server configuration.
 
 ---
 
+## skills
+
+Agent skill system configuration. Skills are curated instruction sets (SKILL.md files) loaded on-demand.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable the skills system. |
+| `paths` | `string[]` | `["~/.ch4p/skills", ".ch4p/skills", ".agents/skills"]` | Directories to search for skills. Later paths override earlier. |
+| `autoLoad` | `boolean` | `true` | Auto-inject skill descriptions into the agent system prompt. |
+| `contextBudget` | `number` | `16000` | Maximum characters for skill context injection. |
+
+### SKILL.md Format
+
+```markdown
+---
+name: my-skill
+description: What this skill does.
+license: MIT
+compatibility: ["claude", "copilot"]
+metadata:
+  author: someone
+  version: "1.0.0"
+---
+
+# Skill Instructions
+
+Markdown body with detailed instructions...
+```
+
+**Name rules**: lowercase alphanumeric with hyphens, 1-64 chars (`^[a-z0-9]+(-[a-z0-9]+)*$`).
+
+**Discovery**: Skills are stored as `{search-path}/{skill-name}/SKILL.md`. Directory name must match the `name` field in the manifest.
+
+---
+
 ## logging
 
 Logging configuration.

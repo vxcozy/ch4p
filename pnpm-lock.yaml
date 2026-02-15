@@ -50,6 +50,9 @@ importers:
       '@ch4p/security':
         specifier: workspace:*
         version: link:../../packages/security
+      '@ch4p/skills':
+        specifier: workspace:*
+        version: link:../../packages/skills
       '@ch4p/supervisor':
         specifier: workspace:*
         version: link:../../packages/supervisor
@@ -125,6 +128,12 @@ importers:
         version: link:../core
 
   packages/security:
+    dependencies:
+      '@ch4p/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/skills:
     dependencies:
       '@ch4p/core':
         specifier: workspace:*

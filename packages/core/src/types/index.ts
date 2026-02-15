@@ -107,4 +107,10 @@ export interface Ch4pConfig {
     observers: string[];
     logLevel: 'debug' | 'info' | 'warn' | 'error';
   };
+  skills: {
+    enabled: boolean;
+    paths: string[];
+    autoLoad: boolean;
+    contextBudget: number;
+  };
 }

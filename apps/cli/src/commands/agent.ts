@@ -22,6 +22,7 @@ import { Session, AgentLoop } from '@ch4p/agent';
 import type { AgentEvent } from '@ch4p/agent';
 import { ToolRegistry } from '@ch4p/tools';
 import { NoopObserver } from '@ch4p/observability';
+import { SkillRegistry } from '@ch4p/skills';
 import { loadConfig } from '../config.js';
 
 // ---------------------------------------------------------------------------
@@ -221,7 +222,21 @@ function createStubEngine(config: Ch4pConfig): IEngine {
 // Session + AgentLoop creation
 // ---------------------------------------------------------------------------
 
-function createSessionConfig(config: Ch4pConfig): SessionConfig {
+function createSessionConfig(config: Ch4pConfig, skillRegistry?: SkillRegistry): SessionConfig {
+  let systemPrompt =
+    'You are ch4p, a personal AI assistant. ' +
+    'You are helpful, concise, and security-conscious. ' +
+    'When asked to perform actions, respect the configured autonomy level.';
+
+  // Inject skill descriptions for progressive disclosure.
+  if (skillRegistry && skillRegistry.size > 0) {
+    const descriptions = skillRegistry.getDescriptions()
+      .map((s) => `  - ${s.name}: ${s.description}`)
+      .join('\n');
+    systemPrompt +=
+      '\n\nAvailable skills (ask to load one for detailed instructions):\n' + descriptions;
+  }
+
   return {
     sessionId: generateId(16),
     engineId: config.engines?.default ?? 'native',
@@ -229,11 +244,22 @@ function createSessionConfig(config: Ch4pConfig): SessionConfig {
     provider: config.agent.provider,
     autonomyLevel: config.autonomy.level,
     cwd: process.cwd(),
-    systemPrompt:
-      'You are ch4p, a personal AI assistant. ' +
-      'You are helpful, concise, and security-conscious. ' +
-      'When asked to perform actions, respect the configured autonomy level.',
+    systemPrompt,
   };
+}
+
+/**
+ * Create the skill registry from configured paths.
+ * Returns an empty registry if skills are disabled or no skills found.
+ */
+function createSkillRegistry(config: Ch4pConfig): SkillRegistry {
+  if (!config.skills?.enabled) return new SkillRegistry();
+  try {
+    return SkillRegistry.createFromPaths(config.skills.paths);
+  } catch {
+    // Skill loading failures shouldn't crash the agent
+    return new SkillRegistry();
+  }
 }
 
 /**
@@ -300,6 +326,7 @@ const REPL_HELP = `
   ${CYAN}/audit${RESET}    Run security audit
   ${CYAN}/memory${RESET}   Show memory status
   ${CYAN}/tools${RESET}    List available tools
+  ${CYAN}/skills${RESET}   List available skills
   ${CYAN}/help${RESET}     Show this help
 `;
 
@@ -309,13 +336,18 @@ const REPL_HELP = `
 
 async function runRepl(config: Ch4pConfig): Promise<void> {
   const engine = createEngine(config);
-  const sessionConfig = createSessionConfig(config);
+  const skillRegistry = createSkillRegistry(config);
+  const sessionConfig = createSessionConfig(config, skillRegistry);
   const tools = createToolRegistry(config);
 
   console.log(`\n  ${CYAN}${BOLD}ch4p${RESET} ${DIM}v0.1.0${RESET}`);
   console.log(`  ${DIM}Interactive mode. Type ${CYAN}/help${DIM} for commands, ${CYAN}/exit${DIM} to quit.${RESET}`);
   console.log(`  ${DIM}Engine: ${engine.name} | Model: ${config.agent.model} | Autonomy: ${config.autonomy.level}${RESET}`);
-  console.log(`  ${DIM}Tools: ${tools.names().join(', ')}${RESET}\n`);
+  console.log(`  ${DIM}Tools: ${tools.names().join(', ')}${RESET}`);
+  if (skillRegistry.size > 0) {
+    console.log(`  ${DIM}Skills: ${skillRegistry.names().join(', ')}${RESET}`);
+  }
+  console.log('');
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -394,6 +426,19 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
           rl.prompt();
           continue;
 
+        case '/skills':
+          if (skillRegistry.size === 0) {
+            console.log(`\n  ${DIM}No skills loaded.${RESET}\n`);
+          } else {
+            console.log(`\n  ${BOLD}Available Skills${RESET} ${DIM}(${skillRegistry.size})${RESET}`);
+            for (const skill of skillRegistry.list()) {
+              console.log(`  ${CYAN}${skill.manifest.name}${RESET} ${DIM}(${skill.source})${RESET} ${skill.manifest.description}`);
+            }
+            console.log('');
+          }
+          rl.prompt();
+          continue;
+
         case '/help':
           console.log(REPL_HELP);
           rl.prompt();
@@ -426,7 +471,8 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
 
 async function runSingleMessage(config: Ch4pConfig, message: string): Promise<void> {
   const engine = createEngine(config);
-  const sessionConfig = createSessionConfig(config);
+  const skillRegistry = createSkillRegistry(config);
+  const sessionConfig = createSessionConfig(config, skillRegistry);
 
   try {
     await runAgentMessage(config, engine, sessionConfig, message);

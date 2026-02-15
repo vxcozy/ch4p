@@ -6,7 +6,7 @@ Personal AI assistant platform. Security-first, multi-channel, programmable.
 
 Built on four pillars:
 
-- **Broad connectivity** — 14+ messaging channels, tunnel exposure, and a skills marketplace. Compatible with OpenClaw channel adapters and plugins.
+- **Broad connectivity** — 14+ messaging channels, tunnel exposure, and a skills system. Compatible with OpenClaw channel adapters, skills, and plugins.
 - **Resilient concurrency** — OTP-style supervision trees, process isolation, backpressure, and live steering for long-running agent sessions.
 - **Security-first defaults** — trait-based architecture where every defense layer is on by default, hybrid memory search, and encrypted secrets at rest.
 - **Agent reliability** — mandatory tool call validation, state snapshots with diff-based verification, and LLM-as-a-judge outcome assessment. Inspired by the [Agent World Model](https://arxiv.org/abs/2602.10090) research.
@@ -68,18 +68,32 @@ Every subsystem is defined by a trait interface — swap any component via confi
 packages/
   core/           # Trait interfaces, types, errors, utilities
   agent/          # Agent runtime: session, context, steering, worker pool
-  providers/      # LLM providers: Anthropic, OpenAI, Ollama
-  engines/        # Execution engines: native (LLM), echo (testing)
-  channels/       # Messaging: CLI (more coming)
-  gateway/        # HTTP server, session routing
+  providers/      # LLM providers: Anthropic, OpenAI, Google, OpenRouter, Ollama, Bedrock
+  engines/        # Execution engines: native (LLM), echo (testing), subprocess (CLI wrappers)
+  channels/       # Messaging: CLI, Telegram, Discord, Slack
+  gateway/        # HTTP server, session routing, pairing authentication
   tools/          # Built-in tools: bash, file ops, grep, glob, web fetch, memory, delegate, MCP client
   memory/         # Hybrid search: SQLite FTS5 + vector embeddings
   security/       # Filesystem scope, command allowlist, secrets, I/O sanitization
   supervisor/     # OTP-style supervision trees, health monitoring
   observability/  # Console, file, multi-observer logging
+  skills/         # Skill discovery, YAML frontmatter parsing, registry (OpenClaw compatible)
+  tunnels/        # Tunnel providers: Cloudflare, Tailscale, ngrok
 apps/
-  cli/            # Command-line interface
+  cli/            # Command-line interface (standalone binary via bun compile)
 ```
+
+## Skills
+
+Skills are curated instruction sets loaded on-demand via progressive disclosure:
+
+```bash
+ch4p skills              # List installed skills
+ch4p skills show <name>  # Display full skill content
+ch4p skills verify       # Validate all manifests
+```
+
+Skills are SKILL.md files with YAML frontmatter, stored in `~/.ch4p/skills/`, `.ch4p/skills/`, or `.agents/skills/`. Compatible with the Agent Skills specification and the OpenClaw skill format.
 
 ## Security
 

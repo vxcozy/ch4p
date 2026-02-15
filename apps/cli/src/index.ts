@@ -104,6 +104,7 @@ function printHelp(): void {
     ${GREEN}tools${RESET}        List available tools
     ${GREEN}pairing${RESET}      Manage gateway pairing
     ${GREEN}message${RESET}      Send a message via a channel
+    ${GREEN}skills${RESET}       Manage agent skills
 
   ${BOLD}Agent Options${RESET}
     ${GREEN}-m, --message${RESET} "text"      Run a single message and exit
@@ -216,6 +217,12 @@ async function main(): Promise<void> {
     case 'message': {
       const { message } = await import('./commands/message.js');
       await message(rest);
+      break;
+    }
+
+    case 'skills': {
+      const { skills } = await import('./commands/skills.js');
+      await skills(rest);
       break;
     }
 

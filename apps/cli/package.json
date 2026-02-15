@@ -29,6 +29,7 @@
     "@ch4p/observability": "workspace:*",
     "@ch4p/engines": "workspace:*",
     "@ch4p/gateway": "workspace:*",
-    "@ch4p/supervisor": "workspace:*"
+    "@ch4p/supervisor": "workspace:*",
+    "@ch4p/skills": "workspace:*"
   }
 }
