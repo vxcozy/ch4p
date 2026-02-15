@@ -1,20 +1,27 @@
 /**
- * Agent command -- interactive REPL and single-message mode.
+ * Agent command — interactive REPL and single-message mode.
  *
  * Two modes:
- *   1. `ch4p agent -m "message"` -- Single message, stream response, exit.
- *   2. `ch4p agent` or `ch4p` -- Interactive REPL with special commands.
+ *   1. `ch4p agent -m "message"` — Single message, stream response, exit.
+ *   2. `ch4p agent` or `ch4p`   — Interactive REPL with special commands.
  *
- * Uses Node.js readline for the REPL loop. Streams output with ANSI colors.
- * Integrates with the @ch4p/agent Session, @ch4p/core engine/provider
- * interfaces, and @ch4p/security policy.
+ * Both modes route through the full AgentLoop pipeline:
+ *   Session → AgentLoop → Engine → Provider → Tools (with AWM validation)
+ *
+ * The old "direct engine" path has been replaced — every message now flows
+ * through AgentLoop for mandatory tool validation, state snapshots, and
+ * optional task-level verification.
  */
 
 import * as readline from 'node:readline';
-import type { Ch4pConfig, IEngine, EngineEvent, SessionConfig } from '@ch4p/core';
+import type { Ch4pConfig, IEngine, SessionConfig } from '@ch4p/core';
 import { generateId } from '@ch4p/core';
 import { NativeEngine } from '@ch4p/engines';
 import { ProviderRegistry } from '@ch4p/providers';
+import { Session, AgentLoop } from '@ch4p/agent';
+import type { AgentEvent } from '@ch4p/agent';
+import { ToolRegistry } from '@ch4p/tools';
+import { NoopObserver } from '@ch4p/observability';
 import { loadConfig } from '../config.js';
 
 // ---------------------------------------------------------------------------
@@ -29,18 +36,20 @@ const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
 const RED = '\x1b[31m';
 const MAGENTA = '\x1b[35m';
+const BLUE = '\x1b[34m';
 
 // ---------------------------------------------------------------------------
-// Streaming output handler
+// AgentEvent output handler
 // ---------------------------------------------------------------------------
 
-function handleEngineEvent(event: EngineEvent): void {
+function handleAgentEvent(event: AgentEvent): void {
   switch (event.type) {
-    case 'started':
+    case 'text':
+      process.stdout.write(event.delta);
       break;
 
-    case 'text_delta':
-      process.stdout.write(event.delta);
+    case 'thinking':
+      process.stdout.write(`${DIM}${event.delta}${RESET}`);
       break;
 
     case 'tool_start':
@@ -59,7 +68,26 @@ function handleEngineEvent(event: EngineEvent): void {
       }
       break;
 
-    case 'completed':
+    case 'tool_validation_error':
+      console.log(`  ${YELLOW}[validation]${RESET} ${event.tool}: ${event.errors.join(', ')}`);
+      break;
+
+    case 'verification': {
+      const v = event.result;
+      const outcomeColor = v.outcome === 'success' ? GREEN : v.outcome === 'partial' ? YELLOW : RED;
+      console.log(`\n  ${BLUE}[verify]${RESET} ${outcomeColor}${v.outcome}${RESET} ${DIM}confidence=${v.confidence.toFixed(2)}${RESET}`);
+      if (v.reasoning) {
+        console.log(`  ${DIM}${v.reasoning}${RESET}`);
+      }
+      if (v.issues && v.issues.length > 0) {
+        for (const issue of v.issues) {
+          console.log(`  ${YELLOW}⚠${RESET} ${issue}`);
+        }
+      }
+      break;
+    }
+
+    case 'complete':
       if (event.usage) {
         console.log(
           `\n${DIM}  tokens: ${event.usage.inputTokens} in / ${event.usage.outputTokens} out${RESET}`,
@@ -69,6 +97,10 @@ function handleEngineEvent(event: EngineEvent): void {
 
     case 'error':
       console.error(`\n  ${RED}Error:${RESET} ${event.error.message}`);
+      break;
+
+    case 'aborted':
+      console.log(`\n  ${YELLOW}Aborted:${RESET} ${event.reason}`);
       break;
   }
 }
@@ -139,7 +171,7 @@ function createStubEngine(config: Ch4pConfig): IEngine {
     async startRun(job, opts) {
       const ref = generateId(12);
 
-      async function* events(): AsyncIterable<EngineEvent> {
+      async function* events(): AsyncIterable<import('@ch4p/core').EngineEvent> {
         yield { type: 'started' };
 
         const lastMessage = job.messages[job.messages.length - 1];
@@ -186,7 +218,7 @@ function createStubEngine(config: Ch4pConfig): IEngine {
 }
 
 // ---------------------------------------------------------------------------
-// Session creation helper
+// Session + AgentLoop creation
 // ---------------------------------------------------------------------------
 
 function createSessionConfig(config: Ch4pConfig): SessionConfig {
@@ -204,20 +236,55 @@ function createSessionConfig(config: Ch4pConfig): SessionConfig {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Run a single message through the engine
-// ---------------------------------------------------------------------------
+/**
+ * Create the default tool registry for CLI sessions.
+ *
+ * Excludes heavyweight tools (bash, delegate) when running in readonly
+ * autonomy mode. Memory tools are always included — the backend may or
+ * may not be wired, but the tools validate gracefully.
+ */
+function createToolRegistry(config: Ch4pConfig): ToolRegistry {
+  if (config.autonomy.level === 'readonly') {
+    return ToolRegistry.createDefault({
+      exclude: ['bash', 'file_write', 'file_edit', 'delegate'],
+    });
+  }
+  return ToolRegistry.createDefault();
+}
 
-async function runMessage(engine: IEngine, sessionConfig: SessionConfig, message: string): Promise<void> {
-  const handle = await engine.startRun({
-    sessionId: sessionConfig.sessionId,
-    messages: [{ role: 'user', content: message }],
-    systemPrompt: sessionConfig.systemPrompt,
-    model: sessionConfig.model,
+/**
+ * Create a full AgentLoop wired with engine, tools, and observer.
+ */
+function createAgentLoop(
+  config: Ch4pConfig,
+  engine: IEngine,
+  sessionConfig: SessionConfig,
+): AgentLoop {
+  const session = new Session(sessionConfig);
+  const tools = createToolRegistry(config);
+  const observer = new NoopObserver();
+
+  return new AgentLoop(session, engine, tools.list(), observer, {
+    maxIterations: 50,
+    maxRetries: 3,
+    enableStateSnapshots: true,
   });
+}
 
-  for await (const event of handle.events) {
-    handleEngineEvent(event);
+// ---------------------------------------------------------------------------
+// Run a single message through the AgentLoop
+// ---------------------------------------------------------------------------
+
+async function runAgentMessage(
+  config: Ch4pConfig,
+  engine: IEngine,
+  sessionConfig: SessionConfig,
+  message: string,
+): Promise<void> {
+  const loop = createAgentLoop(config, engine, sessionConfig);
+
+  for await (const event of loop.run(message)) {
+    handleAgentEvent(event);
   }
 }
 
@@ -243,10 +310,12 @@ const REPL_HELP = `
 async function runRepl(config: Ch4pConfig): Promise<void> {
   const engine = createEngine(config);
   const sessionConfig = createSessionConfig(config);
+  const tools = createToolRegistry(config);
 
   console.log(`\n  ${CYAN}${BOLD}ch4p${RESET} ${DIM}v0.1.0${RESET}`);
   console.log(`  ${DIM}Interactive mode. Type ${CYAN}/help${DIM} for commands, ${CYAN}/exit${DIM} to quit.${RESET}`);
-  console.log(`  ${DIM}Engine: ${engine.name} | Model: ${config.agent.model} | Autonomy: ${config.autonomy.level}${RESET}\n`);
+  console.log(`  ${DIM}Engine: ${engine.name} | Model: ${config.agent.model} | Autonomy: ${config.autonomy.level}${RESET}`);
+  console.log(`  ${DIM}Tools: ${tools.names().join(', ')}${RESET}\n`);
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -312,14 +381,16 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
           console.log(`  ${DIM}Backend: ${config.memory.backend}${RESET}`);
           console.log(`  ${DIM}Auto-save: ${config.memory.autoSave}${RESET}`);
           console.log(`  ${DIM}Vector weight: ${config.memory.vectorWeight ?? 0.7}${RESET}`);
-          console.log(`  ${DIM}Keyword weight: ${config.memory.keywordWeight ?? 0.3}${RESET}`);
-          console.log(`  ${DIM}(Full memory backend not yet connected)${RESET}\n`);
+          console.log(`  ${DIM}Keyword weight: ${config.memory.keywordWeight ?? 0.3}${RESET}\n`);
           rl.prompt();
           continue;
 
         case '/tools':
-          console.log(`\n  ${BOLD}Available Tools${RESET}`);
-          console.log(`  ${DIM}(Tool registry not yet connected. Run 'ch4p tools' for details.)${RESET}\n`);
+          console.log(`\n  ${BOLD}Available Tools${RESET} ${DIM}(${tools.size})${RESET}`);
+          for (const tool of tools.list()) {
+            console.log(`  ${CYAN}${tool.name}${RESET} ${DIM}[${tool.weight}]${RESET} ${tool.description}`);
+          }
+          console.log('');
           rl.prompt();
           continue;
 
@@ -336,10 +407,10 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
       }
     }
 
-    // Run the message through the engine.
+    // Run the message through the full AgentLoop pipeline.
     console.log('');
     try {
-      await runMessage(engine, sessionConfig, input);
+      await runAgentMessage(config, engine, sessionConfig, input);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`\n  ${RED}Error:${RESET} ${message}`);
@@ -358,7 +429,7 @@ async function runSingleMessage(config: Ch4pConfig, message: string): Promise<vo
   const sessionConfig = createSessionConfig(config);
 
   try {
-    await runMessage(engine, sessionConfig, message);
+    await runAgentMessage(config, engine, sessionConfig, message);
     console.log('');
   } catch (err) {
     const errMessage = err instanceof Error ? err.message : String(err);
@@ -375,9 +446,9 @@ async function runSingleMessage(config: Ch4pConfig, message: string): Promise<vo
  * Parse agent-specific flags and run the appropriate mode.
  *
  * Usage:
- *   ch4p agent                -- Interactive REPL
- *   ch4p agent -m "message"   -- Single message
- *   ch4p agent --message "m"  -- Single message (long form)
+ *   ch4p agent                — Interactive REPL
+ *   ch4p agent -m "message"   — Single message
+ *   ch4p agent --message "m"  — Single message (long form)
  */
 export async function agent(args: string[]): Promise<void> {
   let config: Ch4pConfig;

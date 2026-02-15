@@ -35,6 +35,9 @@ importers:
       '@ch4p/engines':
         specifier: workspace:*
         version: link:../../packages/engines
+      '@ch4p/gateway':
+        specifier: workspace:*
+        version: link:../../packages/gateway
       '@ch4p/memory':
         specifier: workspace:*
         version: link:../../packages/memory
