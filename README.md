@@ -4,11 +4,12 @@
 
 Personal AI assistant platform. Security-first, multi-channel, programmable.
 
-Built on three pillars:
+Built on four pillars:
 
 - **Broad connectivity** — 14+ messaging channels, tunnel exposure, and a skills marketplace. Compatible with OpenClaw channel adapters and plugins.
 - **Resilient concurrency** — OTP-style supervision trees, process isolation, backpressure, and live steering for long-running agent sessions.
 - **Security-first defaults** — trait-based architecture where every defense layer is on by default, hybrid memory search, and encrypted secrets at rest.
+- **Agent reliability** — mandatory tool call validation, state snapshots with diff-based verification, and LLM-as-a-judge outcome assessment. Inspired by the [Agent World Model](https://arxiv.org/abs/2602.10090) research.
 
 ## Quick Start
 
@@ -46,7 +47,7 @@ Provider (Anthropic, OpenAI, Ollama)
 
 Every subsystem is defined by a trait interface — swap any component via config, zero code changes.
 
-### 9 Trait Interfaces
+### 10 Trait Interfaces
 
 | Interface | Purpose |
 |---|---|
@@ -59,6 +60,7 @@ Every subsystem is defined by a trait interface — swap any component via confi
 | `IObserver` | Observability (session, tool, LLM, security events) |
 | `ITunnelProvider` | Public URL exposure (start, stop, getPublicUrl) |
 | `IVerifier` | Task-level outcome verification (format + semantic checks) |
+| `IIdentityProvider` | On-chain agent identity and reputation (plugin-ready) |
 
 ## Packages
 

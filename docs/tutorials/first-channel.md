@@ -43,7 +43,7 @@ BotFather responds with your bot token:
 ```
 Done! ...
 Use this token to access the HTTP API:
-7123456789:AAF1x2y3z4a5b6c7d8e9f0g1h2i3j4k5l6m
+YOUR_BOT_TOKEN_HERE
 ```
 
 Copy this token. You will need it in the next step.
@@ -72,7 +72,7 @@ This opens `~/.ch4p/config.json` in your default editor. Add a `channels` sectio
   "channels": {
     "telegram": {
       "enabled": true,
-      "token": "7123456789:AAF1x2y3z4a5b6c7d8e9f0g1h2i3j4k5l6m",
+      "token": "YOUR_BOT_TOKEN_HERE",
       "allowedUsers": []
     }
   }

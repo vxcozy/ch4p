@@ -13,6 +13,8 @@
 import * as readline from 'node:readline';
 import type { Ch4pConfig, IEngine, EngineEvent, SessionConfig } from '@ch4p/core';
 import { generateId } from '@ch4p/core';
+import { NativeEngine } from '@ch4p/engines';
+import { ProviderRegistry } from '@ch4p/providers';
 import { loadConfig } from '../config.js';
 
 // ---------------------------------------------------------------------------
@@ -82,15 +84,52 @@ function truncate(str: string, max: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Engine stub
+// Engine creation
 // ---------------------------------------------------------------------------
 
 /**
- * Create a stub engine that streams a placeholder response.
+ * Create the engine for the CLI session.
  *
- * In production, this will be replaced by the actual engine from @ch4p/engines
- * once that package is implemented. For now, it validates that the CLI
- * plumbing works end-to-end.
+ * Attempts to create a real NativeEngine backed by the configured provider.
+ * If the provider's API key is missing or empty, falls back to a stub engine
+ * so the CLI still boots (useful for offline/demo mode).
+ */
+function createEngine(config: Ch4pConfig): IEngine {
+  const providerName = config.agent.provider;
+  const providerConfig = config.providers?.[providerName] as Record<string, unknown> | undefined;
+
+  // Check if we have a usable API key (Ollama doesn't need one).
+  const apiKey = providerConfig?.apiKey as string | undefined;
+  const needsKey = providerName !== 'ollama';
+
+  if (needsKey && (!apiKey || apiKey.trim().length === 0)) {
+    console.log(`  ${YELLOW}⚠ No API key for ${providerName}. Running in stub mode.${RESET}`);
+    console.log(`  ${DIM}Set ${providerName.toUpperCase()}_API_KEY or run 'ch4p onboard' to configure.${RESET}\n`);
+    return createStubEngine(config);
+  }
+
+  try {
+    const provider = ProviderRegistry.createProvider({
+      id: providerName,
+      type: providerName,
+      ...providerConfig,
+    });
+
+    return new NativeEngine({
+      provider,
+      defaultModel: config.agent.model,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.log(`  ${YELLOW}⚠ Failed to create ${providerName} provider: ${message}${RESET}`);
+    console.log(`  ${DIM}Falling back to stub engine.${RESET}\n`);
+    return createStubEngine(config);
+  }
+}
+
+/**
+ * Stub engine for offline/demo mode.
+ * Echoes back the user's message with configuration info.
  */
 function createStubEngine(config: Ch4pConfig): IEngine {
   return {
@@ -108,18 +147,15 @@ function createStubEngine(config: Ch4pConfig): IEngine {
           ? lastMessage.content
           : '(no message)';
 
-        // Simulate a thinking response.
         const response =
           `I received your message: "${truncate(userText, 100)}"\n\n` +
           `This is a placeholder response from the ch4p stub engine. ` +
-          `The full engine implementation (${config.agent.provider}/${config.agent.model}) ` +
-          `will be available when @ch4p/engines is complete.\n\n` +
+          `To use a real LLM, configure your API key for ${config.agent.provider}.\n\n` +
           `Current configuration:\n` +
           `  Provider: ${config.agent.provider}\n` +
           `  Model: ${config.agent.model}\n` +
           `  Autonomy: ${config.autonomy.level}\n`;
 
-        // Stream character by character (simulating real streaming).
         for (const char of response) {
           if (opts?.signal?.aborted) {
             yield { type: 'error', error: new Error('Aborted') };
@@ -205,7 +241,7 @@ const REPL_HELP = `
 // ---------------------------------------------------------------------------
 
 async function runRepl(config: Ch4pConfig): Promise<void> {
-  const engine = createStubEngine(config);
+  const engine = createEngine(config);
   const sessionConfig = createSessionConfig(config);
 
   console.log(`\n  ${CYAN}${BOLD}ch4p${RESET} ${DIM}v0.1.0${RESET}`);
@@ -318,7 +354,7 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function runSingleMessage(config: Ch4pConfig, message: string): Promise<void> {
-  const engine = createStubEngine(config);
+  const engine = createEngine(config);
   const sessionConfig = createSessionConfig(config);
 
   try {

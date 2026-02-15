@@ -2,7 +2,7 @@
 
 ch4p is a personal AI assistant platform. A play on "chap" — slang for friend — ch4p gives you a programmable, security-first AI agent that speaks across 14+ messaging channels.
 
-Built in TypeScript on Node.js, ch4p combines BEAM-inspired concurrency, a zero-dependency hybrid memory system, multi-engine LLM architecture, and 9 trait interfaces that make every component replaceable.
+Built in TypeScript on Node.js, ch4p combines BEAM-inspired concurrency, a zero-dependency hybrid memory system, multi-engine LLM architecture, and 10 trait interfaces that make every component replaceable.
 
 ---
 
@@ -42,7 +42,7 @@ Practical recipes for specific tasks. Assumes you already understand the basics.
 
 Precise, complete descriptions of ch4p's machinery. Look things up here.
 
-- [Interfaces](reference/interfaces.md) — All 9 trait interfaces: methods, types, fields
+- [Interfaces](reference/interfaces.md) — All 10 trait interfaces: methods, types, fields
 - [Configuration](reference/configuration.md) — Every config.json field, type, and default
 - [CLI Commands](reference/cli.md) — Every command, flag, and output format
 - [Security Subsystem](reference/security.md) — Blocked paths, guards, sanitization, audit items
@@ -68,7 +68,7 @@ The reasoning behind ch4p's design. Read when you want to understand "why."
 | Memory | SQLite with FTS5 + vector hybrid search |
 | Concurrency | BEAM-inspired supervision trees with worker threads |
 | Security | On by default. Filesystem scoping, command allowlists, audit |
-| Interfaces | 9 trait interfaces for full component replacement |
+| Interfaces | 10 trait interfaces for full component replacement |
 | Verification | AWM-inspired step-level validation and task-level outcome verification |
 | MCP | Universal tool connectivity via Model Context Protocol |
 | Dependencies (memory) | Zero external services required |

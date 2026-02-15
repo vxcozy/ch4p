@@ -24,3 +24,9 @@ export type { SessionState, SessionMetadata, SessionOpts } from './session.js';
 
 export { AgentLoop } from './agent-loop.js';
 export type { AgentEvent, AgentLoopOpts } from './agent-loop.js';
+
+export { FormatVerifier } from './format-verifier.js';
+export type { FormatVerifierOpts, FormatRule } from './format-verifier.js';
+
+export { LLMVerifier } from './llm-verifier.js';
+export type { LLMVerifierOpts } from './llm-verifier.js';

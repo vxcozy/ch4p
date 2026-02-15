@@ -7,3 +7,4 @@ export * from './security.js';
 export * from './observer.js';
 export * from './tunnel.js';
 export * from './verifier.js';
+export * from './identity.js';

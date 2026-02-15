@@ -14,8 +14,10 @@ import type {
   ToolResult,
   ValidationResult,
   JSONSchema7,
+  StateSnapshot,
 } from '@ch4p/core';
 import { SecurityError } from '@ch4p/core';
+import { captureFileState } from './snapshot-utils.js';
 
 interface FileEditArgs {
   path: string;
@@ -207,6 +209,18 @@ export class FileEditTool implements ITool {
         replacements: replacedCount,
       },
     };
+  }
+
+  async getStateSnapshot(args: unknown, context: ToolContext): Promise<StateSnapshot> {
+    const { path: filePath } = (args ?? {}) as Partial<FileEditArgs>;
+    if (!filePath) {
+      return {
+        timestamp: new Date().toISOString(),
+        state: { error: 'No path argument provided' },
+      };
+    }
+    const absolutePath = resolve(context.cwd, filePath);
+    return captureFileState(absolutePath);
   }
 }
 

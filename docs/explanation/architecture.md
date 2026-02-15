@@ -26,11 +26,11 @@ This separation exists for a practical reason: each layer changes at a different
 
 ---
 
-## Why Nine Interfaces
+## Why Ten Interfaces
 
-ch4p defines nine trait interfaces: IProvider, IChannel, ITool, IVerifier, IMemoryBackend, IEngine, ISecurityPolicy, IObserver, and ITunnelProvider. This is more than most similar projects, and the reason is deliberate.
+ch4p defines ten trait interfaces: IProvider, IChannel, ITool, IVerifier, IMemoryBackend, IEngine, ISecurityPolicy, IObserver, ITunnelProvider, and IIdentityProvider. This is more than most similar projects, and the reason is deliberate.
 
-Each interface represents a boundary where a different person might want to make a different choice. You might want Anthropic instead of OpenAI. Telegram instead of Discord. SQLite memory instead of PostgreSQL. A permissive security policy instead of a strict one. A code-based verifier instead of an LLM-as-a-judge. By making each of these a formal interface, the system communicates exactly what contract each component must fulfill, and swapping one implementation for another is a matter of implementing the interface and registering it.
+Each interface represents a boundary where a different person might want to make a different choice. You might want Anthropic instead of OpenAI. Telegram instead of Discord. SQLite memory instead of PostgreSQL. A permissive security policy instead of a strict one. A code-based verifier instead of an LLM-as-a-judge. On-chain identity via ERC-8004 or no identity at all. By making each of these a formal interface, the system communicates exactly what contract each component must fulfill, and swapping one implementation for another is a matter of implementing the interface and registering it.
 
 This is the trait pattern from Rust and the interface pattern from Go applied to TypeScript. It trades a bit of upfront ceremony for long-term flexibility.
 
@@ -44,7 +44,7 @@ Three reasons drove the choice of TypeScript over alternatives:
 
 **The ecosystem aligns.** Most messaging platform SDKs have high-quality JavaScript/TypeScript libraries. LLM provider SDKs are JavaScript-first. SQLite bindings (better-sqlite3) are mature. Fighting the ecosystem to use a different language would mean maintaining more code for the same result.
 
-**Type safety without compilation overhead.** TypeScript's structural type system catches interface contract violations at compile time. The 9-interface architecture depends on the compiler verifying that implementations are complete and correct. JavaScript alone would not provide this.
+**Type safety without compilation overhead.** TypeScript's structural type system catches interface contract violations at compile time. The 10-interface architecture depends on the compiler verifying that implementations are complete and correct. JavaScript alone would not provide this.
 
 The tradeoff is that CPU-intensive work (embedding generation, large-scale text processing) is slower in Node.js. ch4p addresses this by offloading such work to worker threads (see [Concurrency](concurrency.md)).
 

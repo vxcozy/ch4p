@@ -9,12 +9,14 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
+import { stat, readdir } from 'node:fs/promises';
 import type {
   ITool,
   ToolContext,
   ToolResult,
   ValidationResult,
   JSONSchema7,
+  StateSnapshot,
 } from '@ch4p/core';
 import { SecurityError } from '@ch4p/core';
 
@@ -275,5 +277,38 @@ export class BashTool implements ITool {
         });
       });
     });
+  }
+
+  async getStateSnapshot(args: unknown, context: ToolContext): Promise<StateSnapshot> {
+    const { command, cwd } = (args ?? {}) as Partial<BashArgs>;
+    const workingDir = cwd ? resolve(context.cwd, cwd) : context.cwd;
+
+    try {
+      const dirStats = await stat(workingDir);
+      const entries = dirStats.isDirectory()
+        ? await readdir(workingDir).then((e) => e.length)
+        : 0;
+
+      return {
+        timestamp: new Date().toISOString(),
+        state: {
+          cwd: workingDir,
+          cwdExists: true,
+          entryCount: entries,
+          command: command?.slice(0, 200),
+        },
+        description: `Working directory state for bash: ${workingDir}`,
+      };
+    } catch {
+      return {
+        timestamp: new Date().toISOString(),
+        state: {
+          cwd: workingDir,
+          cwdExists: false,
+          command: command?.slice(0, 200),
+        },
+        description: `Working directory state for bash: ${workingDir} (does not exist)`,
+      };
+    }
   }
 }

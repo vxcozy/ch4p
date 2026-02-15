@@ -1,6 +1,6 @@
 # Reference: Interfaces
 
-ch4p defines 9 trait interfaces. Every major component is replaceable by implementing the corresponding interface.
+ch4p defines 10 trait interfaces. Every major component is replaceable by implementing the corresponding interface.
 
 ---
 
@@ -563,5 +563,102 @@ interface TunnelInfo {
   publicUrl: string;
   provider: string;
   startedAt: Date;
+}
+```
+
+---
+
+## IIdentityProvider
+
+On-chain agent identity, reputation, and validation. This is a **plugin hook** — the trait interface lives in `@ch4p/core` (zero dependencies), but concrete implementations (e.g., `@ch4p/plugin-erc8004`) bring the chain client. If no identity provider is configured, all identity-aware code paths are skipped.
+
+Designed for [ERC-8004 (Trustless Agents)](https://eips.ethereum.org/EIPS/eip-8004) but abstract enough to support other identity standards.
+
+```typescript
+interface IIdentityProvider {
+  readonly id: string;
+  readonly chainId: number;
+
+  // Identity Registry
+  register(uri?: string, metadata?: Array<{ key: string; value: Uint8Array }>): Promise<AgentIdentity>;
+  getIdentity(agentId: string): Promise<AgentIdentity | null>;
+  setAgentURI(agentId: string, uri: string): Promise<void>;
+  setMetadata(agentId: string, key: string, value: Uint8Array): Promise<void>;
+  getMetadata(agentId: string, key: string): Promise<Uint8Array | null>;
+
+  // Reputation Registry
+  getReputation(agentId: string, trustedClients?: string[], tag1?: string, tag2?: string): Promise<ReputationSummary>;
+  submitFeedback(agentId: string, value: number, decimals: number, opts?: FeedbackOpts): Promise<void>;
+  readFeedback(agentId: string, clientAddress: string, feedbackIndex: number): Promise<FeedbackEntry>;
+
+  // Validation Registry
+  requestValidation(agentId: string, validatorAddress: string, requestURI: string, requestHash: string): Promise<void>;
+  getValidationStatus(requestHash: string): Promise<ValidationStatus | null>;
+  getValidationSummary(agentId: string, trustedValidators?: string[], tag?: string): Promise<ValidationSummary>;
+
+  // Service Discovery
+  resolveAgentURI(agentId: string): Promise<AgentRegistrationFile | null>;
+
+  // Trust Assessment
+  assessTrust(agentId: string, context: TrustContext): Promise<TrustDecision>;
+}
+```
+
+### Types
+
+```typescript
+interface AgentIdentity {
+  agentId: string;
+  registry: string;
+  chainId: number;
+  globalId: string;
+  ownerAddress: string;
+  agentWallet?: string;
+  uri?: string;
+}
+
+interface AgentRegistrationFile {
+  type: string;
+  name: string;
+  description: string;
+  image: string;
+  services: AgentService[];
+  x402Support?: boolean;
+  active?: boolean;
+  registrations?: CrossChainRegistration[];
+  supportedTrust?: string[];
+}
+
+interface AgentService {
+  name: string;
+  endpoint: string;
+  version?: string;
+  skills?: string[];
+  domains?: string[];
+}
+
+interface ReputationSummary {
+  count: number;
+  summaryValue: number;
+  summaryValueDecimals: number;
+  normalizedScore: number;
+}
+
+interface ValidationSummary {
+  count: number;
+  averageResponse: number;
+}
+
+interface TrustContext {
+  operation: 'delegate' | 'mcp_connect' | 'a2a_call' | 'tool_proxy';
+  reputation?: ReputationSummary;
+  validation?: ValidationSummary;
+}
+
+interface TrustDecision {
+  allowed: boolean;
+  reason: string;
+  reputationScore?: number;
+  validationScore?: number;
 }
 ```

@@ -34,6 +34,7 @@ import type {
   ITool,
   IObserver,
   IVerifier,
+  IMemoryBackend,
   ToolResult,
   ToolContext,
   ToolCall,
@@ -85,6 +86,9 @@ export interface AgentLoopOpts {
   /** Whether to capture state snapshots for tools that support them.
    *  Default: true. */
   enableStateSnapshots?: boolean;
+  /** Optional memory backend. When provided, it is injected into the
+   *  ToolContext so memory_store and memory_recall tools can access it. */
+  memoryBackend?: IMemoryBackend;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,9 +124,10 @@ export class AgentLoop {
   private readonly tools: Map<string, ITool>;
   private readonly toolDefs: ToolDefinition[];
   private readonly observer: IObserver;
-  private readonly opts: Required<Omit<AgentLoopOpts, 'verifier' | 'enableStateSnapshots'>> & {
+  private readonly opts: Required<Omit<AgentLoopOpts, 'verifier' | 'enableStateSnapshots' | 'memoryBackend'>> & {
     verifier?: IVerifier;
     enableStateSnapshots: boolean;
+    memoryBackend?: IMemoryBackend;
   };
 
   private abortController: AbortController | null = null;
@@ -154,6 +159,7 @@ export class AgentLoop {
       workerPool: opts.workerPool ?? new ToolWorkerPool(),
       verifier: opts.verifier,
       enableStateSnapshots: opts.enableStateSnapshots ?? true,
+      memoryBackend: opts.memoryBackend,
     };
 
     if (opts.workerPool) {
@@ -642,7 +648,7 @@ export class AgentLoop {
 
     const startTime = Date.now();
 
-    const toolContext: ToolContext = {
+    const toolContext: ToolContext & { memoryBackend?: IMemoryBackend } = {
       sessionId: this.session.getId(),
       cwd: this.session.getConfig().cwd ?? process.cwd(),
       securityPolicy: null as never, // Injected by the security layer at a higher level.
@@ -651,6 +657,8 @@ export class AgentLoop {
         // Progress updates are emitted inline for lightweight tools.
         // For heavyweight tools the worker pool handles streaming.
       },
+      // Inject memory backend so memory_store / memory_recall tools can access it.
+      ...(this.opts.memoryBackend ? { memoryBackend: this.opts.memoryBackend } : {}),
     };
 
     // ----- AWM: Capture pre-execution state snapshot -----

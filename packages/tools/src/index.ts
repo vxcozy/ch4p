@@ -23,6 +23,9 @@ export { McpClientTool } from './mcp-client.js';
 // Registry
 export { ToolRegistry } from './registry.js';
 
+// Snapshot utilities
+export { captureFileState } from './snapshot-utils.js';
+
 // Extended context types
 export type { MemoryToolContext } from './memory-store.js';
 export type { DelegateToolContext } from './delegate.js';

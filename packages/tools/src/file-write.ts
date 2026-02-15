@@ -13,8 +13,10 @@ import type {
   ToolResult,
   ValidationResult,
   JSONSchema7,
+  StateSnapshot,
 } from '@ch4p/core';
 import { SecurityError } from '@ch4p/core';
+import { captureFileState } from './snapshot-utils.js';
 
 interface FileWriteArgs {
   path: string;
@@ -125,5 +127,17 @@ export class FileWriteTool implements ITool {
         bytes: byteCount,
       },
     };
+  }
+
+  async getStateSnapshot(args: unknown, context: ToolContext): Promise<StateSnapshot> {
+    const { path: filePath } = (args ?? {}) as Partial<FileWriteArgs>;
+    if (!filePath) {
+      return {
+        timestamp: new Date().toISOString(),
+        state: { error: 'No path argument provided' },
+      };
+    }
+    const absolutePath = resolve(context.cwd, filePath);
+    return captureFileState(absolutePath);
   }
 }

@@ -227,4 +227,68 @@ describe('FileWriteTool', () => {
       );
     });
   });
+
+  // -----------------------------------------------------------------------
+  // getStateSnapshot
+  // -----------------------------------------------------------------------
+
+  describe('getStateSnapshot', () => {
+    let tmpDir: string;
+
+    beforeEach(async () => {
+      tmpDir = join('/tmp', `ch4p-snap-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      await mkdir(tmpDir, { recursive: true });
+    });
+
+    afterEach(async () => {
+      await rm(tmpDir, { recursive: true, force: true });
+    });
+
+    function makeContext(overrides: Partial<ToolContext> = {}): ToolContext {
+      return createToolContext({ cwd: tmpDir, ...overrides });
+    }
+
+    it('captures non-existent file as exists: false', async () => {
+      const filePath = join(tmpDir, 'new.txt');
+      const ctx = makeContext();
+
+      const snapshot = await tool.getStateSnapshot({ path: filePath, content: '' }, ctx);
+
+      expect(snapshot.state.exists).toBe(false);
+      expect(snapshot.timestamp).toBeDefined();
+    });
+
+    it('captures existing file with size and hash', async () => {
+      const filePath = join(tmpDir, 'existing.txt');
+      await fsWriteFile(filePath, 'original content', 'utf-8');
+      const ctx = makeContext();
+
+      const snapshot = await tool.getStateSnapshot({ path: filePath, content: '' }, ctx);
+
+      expect(snapshot.state.exists).toBe(true);
+      expect(snapshot.state.isFile).toBe(true);
+      expect(snapshot.state.size).toBe(16); // 'original content' = 16 bytes
+      expect(snapshot.state.contentHash).toMatch(/^[a-f0-9]{16}$/);
+    });
+
+    it('shows before/after state diff across a write', async () => {
+      const filePath = join(tmpDir, 'diff.txt');
+      const ctx = makeContext();
+
+      const before = await tool.getStateSnapshot({ path: filePath, content: '' }, ctx);
+      expect(before.state.exists).toBe(false);
+
+      await tool.execute({ path: filePath, content: 'new content' }, ctx);
+
+      const after = await tool.getStateSnapshot({ path: filePath, content: '' }, ctx);
+      expect(after.state.exists).toBe(true);
+      expect(after.state.size).toBeGreaterThan(0);
+    });
+
+    it('handles missing path argument gracefully', async () => {
+      const ctx = makeContext();
+      const snapshot = await tool.getStateSnapshot({}, ctx);
+      expect(snapshot.state.error).toContain('No path');
+    });
+  });
 });
