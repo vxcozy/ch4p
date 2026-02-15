@@ -29,6 +29,10 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Compile-time constant injected by `bun build --compile --define CH4P_VERSION=...`.
+// At runtime in normal Node.js builds this will be `undefined`.
+declare const CH4P_VERSION: string | undefined;
+
 // ---------------------------------------------------------------------------
 // ANSI color helpers
 // ---------------------------------------------------------------------------
@@ -45,6 +49,13 @@ const RED = '\x1b[31m';
 // ---------------------------------------------------------------------------
 
 function getVersion(): string {
+  // When built with `bun build --compile`, CH4P_VERSION is baked in.
+  try {
+    if (typeof CH4P_VERSION === 'string') return CH4P_VERSION;
+  } catch {
+    // Not defined — fall through to filesystem lookup.
+  }
+
   try {
     const __dirname = dirname(fileURLToPath(import.meta.url));
     // Walk up from dist/ or src/ to find package.json.
