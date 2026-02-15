@@ -24,6 +24,7 @@ import { ToolRegistry } from '@ch4p/tools';
 import { NoopObserver } from '@ch4p/observability';
 import { SkillRegistry } from '@ch4p/skills';
 import { loadConfig } from '../config.js';
+import { playBriefSplash } from './splash.js';
 
 // ---------------------------------------------------------------------------
 // ANSI color helpers
@@ -340,7 +341,11 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
   const sessionConfig = createSessionConfig(config, skillRegistry);
   const tools = createToolRegistry(config);
 
-  console.log(`\n  ${CYAN}${BOLD}ch4p${RESET} ${DIM}v0.1.0${RESET}`);
+  // Brief splash animation (TTY only).
+  if (process.stdout.isTTY) {
+    await playBriefSplash();
+  }
+
   console.log(`  ${DIM}Interactive mode. Type ${CYAN}/help${DIM} for commands, ${CYAN}/exit${DIM} to quit.${RESET}`);
   console.log(`  ${DIM}Engine: ${engine.name} | Model: ${config.agent.model} | Autonomy: ${config.autonomy.level}${RESET}`);
   console.log(`  ${DIM}Tools: ${tools.names().join(', ')}${RESET}`);

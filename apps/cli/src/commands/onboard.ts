@@ -23,6 +23,7 @@ import {
   getConfigPath,
 } from '../config.js';
 import { runAudit } from './audit.js';
+import { playFullAnimation } from './splash.js';
 
 // ---------------------------------------------------------------------------
 // ANSI color helpers
@@ -224,9 +225,8 @@ export async function onboard(): Promise<void> {
     console.log(`  ${BOLD}Running security audit...${RESET}\n`);
     runAudit(config);
 
-    // --- Done ---
-    console.log('');
-    console.log(`  ${GREEN}${BOLD}You're ready!${RESET}`);
+    // --- Done — boot-up animation ---
+    await playFullAnimation();
     console.log(`  ${DIM}Run ${CYAN}ch4p${DIM} to start an interactive session.${RESET}`);
     console.log(`  ${DIM}Run ${CYAN}ch4p --help${DIM} for all commands.${RESET}`);
     console.log('');
