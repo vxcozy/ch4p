@@ -103,6 +103,13 @@ Scans agent output for sensitive patterns before delivery to any channel.
 | `AKIA[0-9A-Z]{16}` | `[REDACTED_AWS_KEY]` | AWS access key IDs |
 | `-----BEGIN.*PRIVATE KEY-----` | `[REDACTED_PRIVATE_KEY]` | PEM private keys |
 | `\b\d{3}-\d{2}-\d{4}\b` | `[REDACTED_SSN]` | US Social Security Numbers |
+| `\d{8,10}:[A-Za-z0-9_-]{35,}` | `[REDACTED_TELEGRAM_TOKEN]` | Telegram bot tokens |
+| `[\w-]{24}\.[\w-]{6}\.[\w-]{27,}` | `[REDACTED_DISCORD_TOKEN]` | Discord bot tokens |
+| `(sk\|pk\|rk)_live_[A-Za-z0-9]{20,}` | `[REDACTED_STRIPE_KEY]` | Stripe live API keys |
+| `SG\.[A-Za-z0-9_-]{22,}\.[A-Za-z0-9_-]{20,}` | `[REDACTED_SENDGRID_KEY]` | SendGrid API keys |
+| `eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+` | `[REDACTED_JWT]` | JSON Web Tokens |
+| `(postgres\|mysql\|mongodb(\+srv)?\|redis)://[^\s]+` | `[REDACTED_DB_URL]` | Database connection strings |
+| `np_[a-zA-Z0-9]{36,}` | `[REDACTED_TOKEN]` | npm publish tokens |
 
 ### Processing Order
 
@@ -196,6 +203,65 @@ Commands are killed after `maxExecutionTime` milliseconds. The tool receives:
   "error": "Command timed out after 30000ms"
 }
 ```
+
+---
+
+## SSRF Protection
+
+The `web_fetch` tool includes Server-Side Request Forgery (SSRF) guards to prevent the agent from accessing internal network resources.
+
+### Blocked IP Ranges
+
+| Range | Description |
+|-------|-------------|
+| `127.0.0.0/8` | Loopback (localhost) |
+| `10.0.0.0/8` | Private network |
+| `172.16.0.0/12` | Private network |
+| `192.168.0.0/16` | Private network |
+| `169.254.0.0/16` | Link-local (includes AWS/GCP/Azure metadata at `169.254.169.254`) |
+| `0.0.0.0` | Unspecified address |
+| `100.64.0.0/10` | Shared address space (CGN) |
+| `224.0.0.0/4` | Multicast |
+| `240.0.0.0/4` | Reserved |
+
+### Blocked Hostnames
+
+- `localhost` — loopback hostname
+- `metadata.google.internal` — GCP metadata endpoint
+- `metadata.internal` — generic cloud metadata
+
+### DNS Resolution Check
+
+Even if a hostname appears public, the tool resolves it via DNS before fetching and blocks the request if the resolved IP falls in a private range. This prevents DNS rebinding attacks where a public hostname resolves to an internal IP.
+
+### Redirect Validation
+
+HTTP redirects are followed manually (up to 5 hops). Each redirect target is validated against the same SSRF rules before following. This prevents open-redirect attacks that bounce through a public URL to an internal one.
+
+---
+
+## Secure File Permissions
+
+JSONL transcript files and log directories are created with restricted permissions to prevent other system users from reading agent session data.
+
+| Resource | Permission | Description |
+|----------|------------|-------------|
+| Log directories | `0o700` | Owner read/write/execute only |
+| JSONL transcript files | `0o600` | Owner read/write only |
+
+Permissions are enforced in the `FileObserver` on directory creation (`ensureDir`), file writes (`flushSync`), and log rotation (`rotateIfNeeded`).
+
+---
+
+## Pairing Token Expiration
+
+Authentication tokens issued during the gateway pairing flow have a configurable time-to-live (default: 30 days). Expired tokens are automatically evicted during validation.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `tokenTtlMs` | 30 days | Token lifetime in milliseconds |
+
+The `PairingManager` stores an `expiresAt` timestamp with each paired client. On `validateToken()`, if the token is expired, it is removed from the store and the request is rejected.
 
 ---
 

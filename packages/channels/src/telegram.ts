@@ -34,9 +34,19 @@ export interface TelegramConfig extends ChannelConfig {
   token: string;
   mode?: 'polling' | 'webhook';
   webhookUrl?: string;
+  /** Secret token for webhook signature verification. */
+  webhookSecret?: string;
   pollInterval?: number;
   allowedUsers?: string[];
+  /** Streaming mode: 'off' (default), 'edit' (progressive edits), 'block' (wait then send). */
+  streamMode?: 'off' | 'edit' | 'block';
 }
+
+/** Webhook processing timeout in milliseconds. */
+const WEBHOOK_TIMEOUT_MS = 8_000;
+
+/** Minimum interval between message edits for streaming (Telegram rate limit). */
+const TELEGRAM_EDIT_RATE_LIMIT_MS = 1_000;
 
 /** Minimal Telegram API response shape. */
 interface TelegramResponse<T = unknown> {
@@ -90,6 +100,9 @@ export class TelegramChannel implements IChannel {
   private pollInterval = 1000;
   private allowedUsers: Set<string> = new Set();
   private abortController: AbortController | null = null;
+  private webhookSecret: string | null = null;
+  private streamMode: 'off' | 'edit' | 'block' = 'off';
+  private lastEditTimestamps = new Map<string, number>();
 
   // -----------------------------------------------------------------------
   // IChannel implementation
@@ -106,8 +119,21 @@ export class TelegramChannel implements IChannel {
     this.token = cfg.token;
     this.baseUrl = `https://api.telegram.org/bot${this.token}`;
     this.pollInterval = cfg.pollInterval ?? 1000;
-    this.allowedUsers = new Set(cfg.allowedUsers ?? []);
+    this.streamMode = cfg.streamMode ?? 'off';
+    this.webhookSecret = cfg.webhookSecret ?? null;
     this.abortController = new AbortController();
+
+    // Validate and warn about non-numeric allowedUsers entries.
+    const userEntries = cfg.allowedUsers ?? [];
+    for (const entry of userEntries) {
+      if (!/^\d+$/.test(entry)) {
+        console.warn(
+          `[Telegram] allowedUsers entry "${entry}" is not a numeric Telegram user ID. ` +
+          'Telegram identifies users by numeric ID, not username. This entry may never match.',
+        );
+      }
+    }
+    this.allowedUsers = new Set(userEntries);
 
     // Verify the token is valid.
     const me = await this.apiCall<{ id: number; username?: string }>('getMe');
@@ -121,7 +147,11 @@ export class TelegramChannel implements IChannel {
       if (!cfg.webhookUrl) {
         throw new Error('Webhook mode requires a "webhookUrl" in config');
       }
-      await this.apiCall('setWebhook', { url: cfg.webhookUrl });
+      const webhookParams: Record<string, unknown> = { url: cfg.webhookUrl };
+      if (this.webhookSecret) {
+        webhookParams.secret_token = this.webhookSecret;
+      }
+      await this.apiCall('setWebhook', webhookParams);
     } else {
       // Delete any existing webhook so polling works.
       await this.apiCall('deleteWebhook');
@@ -188,6 +218,49 @@ export class TelegramChannel implements IChannel {
     }
   }
 
+  /**
+   * Edit a previously sent message. Used for progressive streaming updates.
+   * Rate-limited to avoid hitting Telegram API limits.
+   */
+  async editMessage(to: Recipient, messageId: string, message: OutboundMessage): Promise<SendResult> {
+    const chatId = to.userId ?? to.groupId;
+    if (!chatId) {
+      return { success: false, error: 'Recipient must have userId or groupId' };
+    }
+
+    // Rate limit: skip if we edited this message too recently.
+    const lastEdit = this.lastEditTimestamps.get(messageId);
+    const now = Date.now();
+    if (lastEdit && now - lastEdit < TELEGRAM_EDIT_RATE_LIMIT_MS) {
+      return { success: true, messageId }; // Silently skip — not an error.
+    }
+
+    try {
+      const parseMode = message.format === 'markdown' ? 'MarkdownV2' :
+        message.format === 'html' ? 'HTML' : undefined;
+
+      const text = parseMode === 'MarkdownV2'
+        ? this.escapeMarkdownV2(message.text)
+        : message.text;
+
+      await this.apiCall('editMessageText', {
+        chat_id: chatId,
+        message_id: Number(messageId),
+        text,
+        ...(parseMode ? { parse_mode: parseMode } : {}),
+      });
+
+      this.lastEditTimestamps.set(messageId, now);
+
+      return { success: true, messageId };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
   onMessage(handler: (msg: InboundMessage) => void): void {
     this.messageHandler = handler;
   }
@@ -211,13 +284,45 @@ export class TelegramChannel implements IChannel {
   // -----------------------------------------------------------------------
 
   /**
+   * Verify the X-Telegram-Bot-Api-Secret-Token header matches our configured secret.
+   * Returns true if no secret is configured (verification disabled) or if the header matches.
+   */
+  verifyWebhookSecret(secretHeader?: string): boolean {
+    if (!this.webhookSecret) return true; // No secret configured — verification disabled.
+    return secretHeader === this.webhookSecret;
+  }
+
+  /**
    * Process a webhook update from Telegram.
    * Call this from a gateway route handler when receiving POST /webhook/telegram.
+   *
+   * @param update - The Telegram update object.
+   * @param secretHeader - The X-Telegram-Bot-Api-Secret-Token header value (optional).
    */
-  handleWebhookUpdate(update: TelegramUpdate): void {
+  handleWebhookUpdate(update: TelegramUpdate, secretHeader?: string): void {
+    // Verify webhook secret if configured. Silently reject mismatches.
+    if (!this.verifyWebhookSecret(secretHeader)) {
+      return;
+    }
+
     if (update.message) {
       this.processMessage(update.message);
     }
+  }
+
+  /**
+   * Get the webhook timeout value for gateway-level timeout enforcement.
+   * The gateway should race its HTTP response against this timeout.
+   */
+  static get WEBHOOK_TIMEOUT_MS(): number {
+    return WEBHOOK_TIMEOUT_MS;
+  }
+
+  /**
+   * Get the current stream mode configuration.
+   */
+  getStreamMode(): 'off' | 'edit' | 'block' {
+    return this.streamMode;
   }
 
   // -----------------------------------------------------------------------
@@ -391,13 +496,33 @@ export class TelegramChannel implements IChannel {
   }
 
   private async sendAttachment(chatId: string, att: Attachment): Promise<void> {
-    const method = att.type === 'image' ? 'sendPhoto' :
-      att.type === 'audio' ? 'sendAudio' :
-      att.type === 'video' ? 'sendVideo' : 'sendDocument';
+    // Detect OGG/Opus audio and use sendVoice (Telegram voice message) instead of sendAudio.
+    const isVoice =
+      att.type === 'audio' &&
+      (att.mimeType === 'audio/ogg' ||
+       att.mimeType === 'audio/ogg; codecs=opus' ||
+       att.filename?.endsWith('.ogg') ||
+       att.filename?.endsWith('.oga'));
 
-    const paramKey = att.type === 'image' ? 'photo' :
-      att.type === 'audio' ? 'audio' :
-      att.type === 'video' ? 'video' : 'document';
+    let method: string;
+    let paramKey: string;
+
+    if (isVoice) {
+      method = 'sendVoice';
+      paramKey = 'voice';
+    } else if (att.type === 'image') {
+      method = 'sendPhoto';
+      paramKey = 'photo';
+    } else if (att.type === 'audio') {
+      method = 'sendAudio';
+      paramKey = 'audio';
+    } else if (att.type === 'video') {
+      method = 'sendVideo';
+      paramKey = 'video';
+    } else {
+      method = 'sendDocument';
+      paramKey = 'document';
+    }
 
     await this.apiCall(method, {
       chat_id: chatId,

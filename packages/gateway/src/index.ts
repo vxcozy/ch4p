@@ -22,3 +22,6 @@ export { CanvasSessionManager } from './canvas-session.js';
 export type { CanvasSessionEntry } from './canvas-session.js';
 
 export { serveStatic } from './static.js';
+
+export { StreamHandler } from './stream-handler.js';
+export type { StreamHandlerOpts, StreamableEvent } from './stream-handler.js';

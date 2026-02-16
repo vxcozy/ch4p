@@ -406,4 +406,134 @@ b3BlbnNzaC1rZXktdjEAAAAA...
       expect(result.clean).toBe('Before sk-[REDACTED] After');
     });
   });
+
+  // -----------------------------------------------------------------------
+  // Telegram bot tokens
+  // -----------------------------------------------------------------------
+
+  describe('Telegram bot token detection', () => {
+    it('redacts a Telegram bot token', () => {
+      const token = '123456789:ABCdefGhIjKlMnOpQrStUvWxYz0123456789';
+      const text = `Bot token: ${token}`;
+      const result = sanitizer.sanitize(text);
+      expect(result.clean).toContain('[TELEGRAM_BOT_TOKEN_REDACTED]');
+      expect(result.clean).not.toContain(token);
+      expect(result.redacted).toBe(true);
+      expect(result.redactedPatterns).toContain('Telegram bot token');
+    });
+
+    it('does not false-positive on short numeric:alpha strings', () => {
+      const result = sanitizer.sanitize('123:abc');
+      expect(result.redacted).toBe(false);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Discord bot tokens
+  // -----------------------------------------------------------------------
+
+  describe('Discord bot token detection', () => {
+    it('redacts a Discord bot token', () => {
+      const token = 'MTIzNDU2Nzg5MDEyMzQ1Njc4.OTkxMj.abcdefghijklmnopqrstuvwxyz12345';
+      const text = `Discord token: ${token}`;
+      const result = sanitizer.sanitize(text);
+      expect(result.clean).toContain('[DISCORD_BOT_TOKEN_REDACTED]');
+      expect(result.clean).not.toContain(token);
+      expect(result.redacted).toBe(true);
+      expect(result.redactedPatterns).toContain('Discord bot token');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Stripe keys
+  // -----------------------------------------------------------------------
+
+  describe('Stripe key detection', () => {
+    it('redacts Stripe secret key', () => {
+      const key = 'sk_live_' + 'a'.repeat(24);
+      const result = sanitizer.sanitize(`Key: ${key}`);
+      expect(result.clean).toContain('sk_live_[REDACTED]');
+      expect(result.clean).not.toContain(key);
+      expect(result.redactedPatterns).toContain('Stripe secret key');
+    });
+
+    it('redacts Stripe publishable key', () => {
+      const key = 'pk_live_' + 'b'.repeat(24);
+      const result = sanitizer.sanitize(`Key: ${key}`);
+      expect(result.clean).toContain('pk_live_[REDACTED]');
+      expect(result.clean).not.toContain(key);
+      expect(result.redactedPatterns).toContain('Stripe publishable key');
+    });
+
+    it('redacts Stripe restricted key', () => {
+      const key = 'rk_live_' + 'c'.repeat(24);
+      const result = sanitizer.sanitize(`Key: ${key}`);
+      expect(result.clean).toContain('rk_live_[REDACTED]');
+      expect(result.clean).not.toContain(key);
+      expect(result.redactedPatterns).toContain('Stripe restricted key');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // SendGrid API keys
+  // -----------------------------------------------------------------------
+
+  describe('SendGrid API key detection', () => {
+    it('redacts SendGrid API key', () => {
+      const key = 'SG.' + 'a'.repeat(22) + '.' + 'b'.repeat(22);
+      const result = sanitizer.sanitize(`SendGrid: ${key}`);
+      expect(result.clean).toContain('SG.[REDACTED]');
+      expect(result.clean).not.toContain(key);
+      expect(result.redactedPatterns).toContain('SendGrid API key');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // JWT tokens
+  // -----------------------------------------------------------------------
+
+  describe('JWT token detection', () => {
+    it('redacts a JWT token', () => {
+      const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.Rq8IjqbaZ7lN_aB_abc123';
+      const result = sanitizer.sanitize(`Token: ${jwt}`);
+      expect(result.clean).toContain('[JWT_REDACTED]');
+      expect(result.clean).not.toContain(jwt);
+      expect(result.redactedPatterns).toContain('JWT token');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Database connection strings
+  // -----------------------------------------------------------------------
+
+  describe('database connection string detection', () => {
+    it('redacts PostgreSQL connection string', () => {
+      const connStr = 'postgres://admin:secretpass@db.example.com:5432/mydb';
+      const result = sanitizer.sanitize(`DB: ${connStr}`);
+      expect(result.clean).toContain('[DB_CONNECTION_REDACTED]');
+      expect(result.clean).not.toContain('secretpass');
+      expect(result.redactedPatterns).toContain('Database connection string');
+    });
+
+    it('redacts MongoDB connection string', () => {
+      const connStr = 'mongodb+srv://user:pass@cluster.mongodb.net/dbname';
+      const result = sanitizer.sanitize(`Mongo: ${connStr}`);
+      expect(result.clean).toContain('[DB_CONNECTION_REDACTED]');
+      expect(result.clean).not.toContain('pass');
+    });
+
+    it('redacts Redis connection string', () => {
+      const connStr = 'redis://default:mysecret@redis.example.com:6379';
+      const result = sanitizer.sanitize(`Redis: ${connStr}`);
+      expect(result.clean).toContain('[DB_CONNECTION_REDACTED]');
+      expect(result.clean).not.toContain('mysecret');
+    });
+
+    it('redacts MySQL connection string', () => {
+      const connStr = 'mysql://root:password123@localhost:3306/app';
+      const result = sanitizer.sanitize(`MySQL: ${connStr}`);
+      expect(result.clean).toContain('[DB_CONNECTION_REDACTED]');
+      expect(result.clean).not.toContain('password123');
+    });
+  });
 });

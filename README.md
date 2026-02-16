@@ -87,9 +87,9 @@ packages/
   agent/          # Agent runtime: session, context, steering, worker pool
   providers/      # LLM providers: Anthropic, OpenAI, Google, OpenRouter, Ollama, Bedrock
   engines/        # Execution engines: native (LLM), echo (testing), subprocess (CLI wrappers)
-  channels/       # Messaging: CLI, Telegram, Discord, Slack
+  channels/       # Messaging: CLI, Telegram, Discord, Slack, Matrix, WhatsApp, Signal, iMessage
   canvas/         # A2UI components, canvas state, WS protocol, CanvasTool, CanvasChannel
-  gateway/        # HTTP server, session routing, WebSocket bridge, pairing authentication
+  gateway/        # HTTP server, session routing, WebSocket bridge, pairing authentication, stream handler
   tools/          # Built-in tools: bash, file ops, grep, glob, web fetch, memory, delegate, MCP client
   memory/         # Hybrid search: SQLite FTS5 + vector embeddings
   security/       # Filesystem scope, command allowlist, secrets, I/O sanitization
@@ -131,14 +131,17 @@ The canvas is fully bidirectional — click a button on a card, submit a form, o
 
 ## Security
 
-Security is on by default with six defense layers:
+Security is on by default with nine defense layers:
 
 1. **Filesystem scoping** — all file operations constrained to workspace root, symlink escape detection
 2. **Command allowlist** — only approved commands execute, shell metacharacter injection blocked
 3. **Encrypted secrets** — AES-256-GCM with PBKDF2 key derivation
-4. **Output sanitization** — 16 regex patterns strip API keys, tokens, credentials from responses
+4. **Output sanitization** — 25 regex patterns strip API keys, tokens, credentials from responses
 5. **Input validation** — prompt injection, jailbreak, and data exfiltration detection
 6. **Autonomy levels** — `readonly` / `supervised` / `full` control over what the agent can do without confirmation
+7. **SSRF protection** — private IP blocking, DNS resolution checks, and cloud metadata endpoint guards in web fetch
+8. **Secure file permissions** — JSONL transcripts written with `0o600`, log directories `0o700`
+9. **Pairing token expiration** — all authentication tokens expire (default 30 days), with automatic eviction
 
 ## Agent Reliability (AWM)
 
@@ -166,7 +169,7 @@ Three backends: `sqlite` (primary), `markdown` (portable), `noop` (disabled).
 # Build all 18 packages
 corepack pnpm -r build
 
-# Run all 1578 tests
+# Run all 1656 tests
 corepack pnpm test
 
 # Build a single package
@@ -180,7 +183,7 @@ corepack pnpm --filter @ch4p/core build
 - ESM-only (all imports use `.js` extension)
 - Zero external runtime dependencies for core, security, and CLI packages
 - `tsup` for bundling, `vitest` for testing, `vite` for web frontend
-- 53 test files, 1578 tests
+- 55 test files, 1656 tests
 
 ## Configuration
 

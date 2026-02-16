@@ -10,7 +10,7 @@
  * Default limit: 10 MB
  */
 
-import { writeFileSync, appendFileSync, renameSync, statSync, mkdirSync, existsSync } from 'node:fs';
+import { writeFileSync, appendFileSync, renameSync, statSync, mkdirSync, existsSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -71,7 +71,7 @@ export class FileObserver implements IObserver {
   private ensureDir(): void {
     const dir = dirname(this.filePath);
     if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
   }
 
@@ -102,7 +102,8 @@ export class FileObserver implements IObserver {
     this.buffer = [];
 
     try {
-      appendFileSync(this.filePath, payload, 'utf-8');
+      appendFileSync(this.filePath, payload, { encoding: 'utf-8', mode: 0o600 });
+      chmodSync(this.filePath, 0o600);
     } catch {
       // If we cannot write, silently drop — observability must never crash the host.
     }
@@ -114,7 +115,7 @@ export class FileObserver implements IObserver {
       if (stats.size >= this.maxBytes) {
         const rotatedPath = this.filePath + '.1';
         renameSync(this.filePath, rotatedPath);
-        writeFileSync(this.filePath, '', 'utf-8');
+        writeFileSync(this.filePath, '', { encoding: 'utf-8', mode: 0o600 });
       }
     } catch {
       // File may not exist yet — that is fine.

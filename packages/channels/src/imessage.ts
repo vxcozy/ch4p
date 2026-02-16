@@ -9,6 +9,12 @@
  *     for new inbound messages. Tracks ROWID offset to avoid reprocessing.
  *   - Sending: Invokes `osascript -l JavaScript` (JXA) to drive Messages.app.
  *
+ * Features:
+ *   - Tapback reactions (love, like, dislike, laugh, emphasis, question)
+ *   - Thread context via thread_originator_guid
+ *   - Group chat detection via chat_identifier
+ *   - Destination caller ID and display name metadata
+ *
  * macOS requirements:
  *   1. Full Disk Access -- System Settings > Privacy & Security > Full Disk Access
  *      must be granted to your terminal (or the Node.js binary) so that the process
@@ -58,6 +64,18 @@ interface MessageRow {
   handle: string;
   is_from_me: number;
   cache_has_attachments: number;
+  /** Tapback/reaction type (2000-2005 = add, 3000-3005 = remove). Null for normal messages. */
+  associated_message_type: number | null;
+  /** GUID of the message this tapback applies to. */
+  associated_message_guid: string | null;
+  /** GUID of the thread originator (for threaded replies). */
+  thread_originator_guid: string | null;
+  /** Destination caller ID (recipient identifier in group chats). */
+  destination_caller_id: string | null;
+  /** Chat identifier (e.g., "chat123456789" for group chats, phone/email for DMs). */
+  chat_identifier: string | null;
+  /** Display name of the chat (group name). */
+  display_name: string | null;
 }
 
 /** Shape of a row returned by the sqlite3 -json query for attachments. */
@@ -87,6 +105,35 @@ function classifyMimeType(mime: string | null): Attachment['type'] {
   if (mime.startsWith('audio/')) return 'audio';
   if (mime.startsWith('video/')) return 'video';
   return 'file';
+}
+
+// ---------------------------------------------------------------------------
+// Tapback reaction types
+// ---------------------------------------------------------------------------
+
+/**
+ * iMessage tapback types.
+ * 2000–2005: adding a reaction. 3000–3005: removing a reaction.
+ */
+const TAPBACK_TYPES: Record<number, { name: string; isRemove: boolean }> = {
+  2000: { name: 'love', isRemove: false },
+  2001: { name: 'like', isRemove: false },
+  2002: { name: 'dislike', isRemove: false },
+  2003: { name: 'laugh', isRemove: false },
+  2004: { name: 'emphasis', isRemove: false },
+  2005: { name: 'question', isRemove: false },
+  3000: { name: 'love', isRemove: true },
+  3001: { name: 'like', isRemove: true },
+  3002: { name: 'dislike', isRemove: true },
+  3003: { name: 'laugh', isRemove: true },
+  3004: { name: 'emphasis', isRemove: true },
+  3005: { name: 'question', isRemove: true },
+};
+
+/** Check whether an associated_message_type value represents a tapback reaction. */
+function isReaction(associatedMessageType: number | null): boolean {
+  if (associatedMessageType === null || associatedMessageType === 0) return false;
+  return associatedMessageType in TAPBACK_TYPES;
 }
 
 // ---------------------------------------------------------------------------
@@ -238,12 +285,33 @@ export class IMessageChannel implements IChannel {
     }
   }
 
+  /**
+   * Send a tapback reaction to a message.
+   *
+   * Currently a stub — sending tapback reactions programmatically requires
+   * UI automation via JXA which is fragile and macOS-version-dependent.
+   * This is a placeholder for future implementation.
+   */
+  async sendReaction(
+    _to: Recipient,
+    _messageGuid: string,
+    _reactionType: string,
+  ): Promise<SendResult> {
+    return {
+      success: false,
+      error: 'Sending tapback reactions is not yet supported. ' +
+        'This requires JXA UI automation which is fragile and macOS-version-dependent.',
+    };
+  }
+
   onMessage(handler: (msg: InboundMessage) => void): void {
     this.messageHandler = handler;
   }
 
   onPresence(_handler: (event: PresenceEvent) => void): void {
     // iMessage does not expose presence/typing events via chat.db.
+    // The chat.db database has no typing indicator data — this is a
+    // platform limitation, not a missing feature.
   }
 
   async isHealthy(): Promise<boolean> {
@@ -281,11 +349,18 @@ export class IMessageChannel implements IChannel {
   private async pollMessages(): Promise<void> {
     if (!this.messageHandler) return;
 
+    // Expanded query: joins chat table for group ID and display name,
+    // includes reaction/thread/destination fields.
     const query = [
       'SELECT m.ROWID, m.text, m.date, h.id as handle, m.is_from_me,',
-      '       m.cache_has_attachments',
+      '       m.cache_has_attachments,',
+      '       m.associated_message_type, m.associated_message_guid,',
+      '       m.thread_originator_guid, m.destination_caller_id,',
+      '       c.chat_identifier, c.display_name',
       'FROM message m',
       'JOIN handle h ON m.handle_id = h.ROWID',
+      'LEFT JOIN chat_message_join cmj ON m.ROWID = cmj.message_id',
+      'LEFT JOIN chat c ON cmj.chat_id = c.ROWID',
       `WHERE m.ROWID > ${this.lastRowId} AND m.is_from_me = 0`,
       'ORDER BY m.ROWID ASC;',
     ].join(' ');
@@ -326,6 +401,42 @@ export class IMessageChannel implements IChannel {
   // -----------------------------------------------------------------------
 
   private async processRow(row: MessageRow): Promise<InboundMessage | null> {
+    // --- Tapback reaction handling ---
+    if (isReaction(row.associated_message_type)) {
+      const tapback = TAPBACK_TYPES[row.associated_message_type!];
+      if (!tapback) return null; // Unknown reaction type.
+
+      // Extract the target message GUID. iMessage stores it as "p:0/GUID" or "bp:GUID".
+      let targetGuid = row.associated_message_guid ?? '';
+      // Strip the "p:N/" or "bp:" prefix to get the raw GUID.
+      const guidMatch = targetGuid.match(/^(?:p:\d+\/|bp:)(.+)$/);
+      if (guidMatch) {
+        targetGuid = guidMatch[1]!;
+      }
+
+      return {
+        id: String(row.ROWID),
+        channelId: this.id,
+        from: {
+          channelId: this.id,
+          userId: row.handle,
+          groupId: row.chat_identifier ?? undefined,
+        },
+        text: tapback.isRemove
+          ? `[Removed ${tapback.name} reaction]`
+          : `[${tapback.name} reaction]`,
+        replyTo: targetGuid || undefined,
+        timestamp: imessageDateToJS(row.date),
+        raw: {
+          ...row,
+          reaction: true,
+          reactionType: tapback.name,
+          reactionRemoved: tapback.isRemove,
+        },
+      };
+    }
+
+    // --- Normal message handling ---
     const text = row.text ?? '';
     if (!text && !row.cache_has_attachments) return null;
 
@@ -339,17 +450,29 @@ export class IMessageChannel implements IChannel {
     // Skip rows with neither text nor attachments.
     if (!text && !attachments) return null;
 
+    // Determine group context from chat table.
+    const isGroup = row.chat_identifier
+      ? row.chat_identifier.startsWith('chat')
+      : false;
+
     return {
       id: String(row.ROWID),
       channelId: this.id,
       from: {
         channelId: this.id,
         userId: row.handle,
+        groupId: isGroup ? (row.chat_identifier ?? undefined) : undefined,
       },
       text,
       attachments,
+      // Thread context: if this message is a reply in a thread.
+      replyTo: row.thread_originator_guid ?? undefined,
       timestamp: imessageDateToJS(row.date),
-      raw: row,
+      raw: {
+        ...row,
+        destination_caller_id: row.destination_caller_id,
+        display_name: row.display_name,
+      },
     };
   }
 

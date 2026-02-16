@@ -64,4 +64,11 @@ export interface IChannel {
   onMessage(handler: (msg: InboundMessage) => void): void;
   onPresence?(handler: (event: PresenceEvent) => void): void;
   isHealthy(): Promise<boolean>;
+
+  /**
+   * Edit a previously sent message. Used for progressive streaming (edit-based).
+   * Optional — channels that don't support message editing simply omit this.
+   * The gateway detects capability via `channel.editMessage !== undefined`.
+   */
+  editMessage?(to: Recipient, messageId: string, message: OutboundMessage): Promise<SendResult>;
 }

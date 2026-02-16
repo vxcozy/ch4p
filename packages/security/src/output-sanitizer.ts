@@ -69,6 +69,52 @@ const SENSITIVE_PATTERNS: readonly SensitivePattern[] = [
     replacement: 'github_pat_[REDACTED]',
   },
 
+  // -- Telegram & Discord tokens --
+  {
+    name: 'Telegram bot token',
+    pattern: /\b\d{8,10}:[A-Za-z0-9_-]{35,}\b/g,
+    replacement: '[TELEGRAM_BOT_TOKEN_REDACTED]',
+  },
+  {
+    name: 'Discord bot token',
+    pattern: /[\w-]{24}\.[\w-]{6}\.[\w-]{27,}/g,
+    replacement: '[DISCORD_BOT_TOKEN_REDACTED]',
+  },
+
+  // -- Payment provider keys --
+  {
+    name: 'Stripe secret key',
+    pattern: /sk_live_[A-Za-z0-9]{20,}/g,
+    replacement: 'sk_live_[REDACTED]',
+  },
+  {
+    name: 'Stripe publishable key',
+    pattern: /pk_live_[A-Za-z0-9]{20,}/g,
+    replacement: 'pk_live_[REDACTED]',
+  },
+  {
+    name: 'Stripe restricted key',
+    pattern: /rk_live_[A-Za-z0-9]{20,}/g,
+    replacement: 'rk_live_[REDACTED]',
+  },
+  {
+    name: 'SendGrid API key',
+    pattern: /SG\.[A-Za-z0-9_-]{22,}\.[A-Za-z0-9_-]{20,}/g,
+    replacement: 'SG.[REDACTED]',
+  },
+
+  // -- JWT & connection strings --
+  {
+    name: 'JWT token',
+    pattern: /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
+    replacement: '[JWT_REDACTED]',
+  },
+  {
+    name: 'Database connection string',
+    pattern: /(?:postgres|mysql|mongodb(?:\+srv)?|redis):\/\/[^:]+:[^@]+@[^\s'"]+/g,
+    replacement: '[DB_CONNECTION_REDACTED]',
+  },
+
   // -- AWS credentials --
   {
     name: 'AWS access key ID',

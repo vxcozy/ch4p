@@ -33,12 +33,16 @@ export interface PairedClient {
   tokenHash: string;
   pairedAt: Date;
   lastSeenAt: Date;
+  /** When this token expires. Expired tokens are rejected and evicted. */
+  expiresAt: Date;
   label?: string;
 }
 
 export interface PairingManagerOpts {
   /** Code lifetime in milliseconds. Default: 5 minutes. */
   codeTtlMs?: number;
+  /** Token lifetime in milliseconds. Default: 30 days. */
+  tokenTtlMs?: number;
   /** Maximum number of active pairing codes. Default: 5. */
   maxActiveCodes?: number;
   /** Maximum number of paired clients. Default: 20. */
@@ -53,11 +57,13 @@ export class PairingManager {
   private readonly codes = new Map<string, PairingCode>();
   private readonly clients = new Map<string, PairedClient>();
   private readonly codeTtlMs: number;
+  private readonly tokenTtlMs: number;
   private readonly maxActiveCodes: number;
   private readonly maxPairedClients: number;
 
   constructor(opts: PairingManagerOpts = {}) {
     this.codeTtlMs = opts.codeTtlMs ?? 5 * 60 * 1000; // 5 minutes
+    this.tokenTtlMs = opts.tokenTtlMs ?? 30 * 24 * 60 * 60 * 1000; // 30 days
     this.maxActiveCodes = opts.maxActiveCodes ?? 5;
     this.maxPairedClients = opts.maxPairedClients ?? 20;
   }
@@ -151,6 +157,7 @@ export class PairingManager {
       tokenHash,
       pairedAt: now,
       lastSeenAt: now,
+      expiresAt: new Date(now.getTime() + this.tokenTtlMs),
       label: label ?? pairingCode.label,
     });
 
@@ -163,13 +170,20 @@ export class PairingManager {
 
   /**
    * Validate a bearer token.
-   * Returns true if the token belongs to a paired client.
+   * Returns true if the token belongs to a paired client and has not expired.
    * Updates `lastSeenAt` on successful validation.
+   * Expired tokens are evicted on discovery.
    */
   validateToken(token: string): boolean {
     const tokenHash = this.hashToken(token);
     const client = this.clients.get(tokenHash);
     if (!client) return false;
+
+    // Check token expiration.
+    if (new Date() > client.expiresAt) {
+      this.clients.delete(tokenHash);
+      return false;
+    }
 
     client.lastSeenAt = new Date();
     return true;
@@ -179,11 +193,13 @@ export class PairingManager {
    * List all paired clients (tokens are masked).
    */
   listClients(): Array<Omit<PairedClient, 'token'> & { tokenPreview: string }> {
+    this.pruneExpiredTokens();
     return [...this.clients.values()].map((c) => ({
       tokenHash: c.tokenHash,
       tokenPreview: c.token.slice(0, 8) + '...',
       pairedAt: c.pairedAt,
       lastSeenAt: c.lastSeenAt,
+      expiresAt: c.expiresAt,
       label: c.label,
     }));
   }
@@ -200,6 +216,7 @@ export class PairingManager {
    */
   stats(): { activeCodes: number; pairedClients: number } {
     this.pruneExpiredCodes();
+    this.pruneExpiredTokens();
     return {
       activeCodes: this.codes.size,
       pairedClients: this.clients.size,
@@ -230,6 +247,15 @@ export class PairingManager {
     for (const [code, pc] of this.codes) {
       if (now > pc.expiresAt) {
         this.codes.delete(code);
+      }
+    }
+  }
+
+  private pruneExpiredTokens(): void {
+    const now = new Date();
+    for (const [hash, client] of this.clients) {
+      if (now > client.expiresAt) {
+        this.clients.delete(hash);
       }
     }
   }

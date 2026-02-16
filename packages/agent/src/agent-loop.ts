@@ -51,9 +51,35 @@ import { EngineError, ToolError } from '@ch4p/core';
 import { sleep, backoffDelay } from '@ch4p/core';
 import { setMaxListeners } from 'node:events';
 
+import { homedir } from 'node:os';
+
 import { Session } from './session.js';
 import type { SteeringMessage } from './steering.js';
 import { ToolWorkerPool } from './worker-pool.js';
+
+// ---------------------------------------------------------------------------
+// Workspace path sanitization
+// ---------------------------------------------------------------------------
+
+/**
+ * Strip the user's home directory prefix from a workspace path before it is
+ * embedded in LLM prompts or tool contexts. This prevents the real home
+ * directory path (which may contain a username) from leaking into model
+ * context and, by extension, into channel responses.
+ *
+ * Examples:
+ *   /Users/alice/projects/foo  →  ./projects/foo
+ *   /home/alice/projects/foo   →  ./projects/foo
+ *   /tmp/sandbox               →  /tmp/sandbox  (no change — outside $HOME)
+ */
+function sanitizeWorkspacePath(cwd: string): string {
+  const home = homedir();
+  if (cwd === home) return '.';
+  if (cwd.startsWith(home + '/')) {
+    return './' + cwd.slice(home.length + 1);
+  }
+  return cwd;
+}
 
 // ---------------------------------------------------------------------------
 // AgentEvent — the public event stream type
@@ -690,9 +716,10 @@ export class AgentLoop {
 
     const startTime = Date.now();
 
+    const rawCwd = this.session.getConfig().cwd ?? process.cwd();
     const toolContext: ToolContext & { memoryBackend?: IMemoryBackend } = {
       sessionId: this.session.getId(),
-      cwd: this.session.getConfig().cwd ?? process.cwd(),
+      cwd: sanitizeWorkspacePath(rawCwd),
       securityPolicy: this.opts.securityPolicy ?? PERMISSIVE_POLICY,
       abortSignal: signal,
       onProgress: (_update: string) => {
@@ -726,7 +753,7 @@ export class AgentLoop {
             args: toolCall.args,
             context: {
               sessionId: this.session.getId(),
-              cwd: this.session.getConfig().cwd ?? process.cwd(),
+              cwd: sanitizeWorkspacePath(rawCwd),
             },
           },
           signal,

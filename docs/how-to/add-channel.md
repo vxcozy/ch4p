@@ -206,6 +206,28 @@ This validates:
 
 ---
 
+## Optional: Edit-Based Streaming
+
+If the platform supports editing previously sent messages, you can implement the optional `editMessage()` method to enable progressive streaming. The gateway's `StreamHandler` will detect this capability automatically and stream the agent's response in-place instead of waiting for the complete answer.
+
+```typescript
+async editMessage(to: Recipient, messageId: string, message: OutboundMessage): Promise<SendResult> {
+  // Rate limit to avoid hitting platform API limits (e.g., 1 edit/second).
+  const now = Date.now();
+  if (now - this.lastEditTime < 1000) {
+    return { success: true, messageId }; // Skip, not an error.
+  }
+
+  await this.api.editMessage(messageId, message.text);
+  this.lastEditTime = now;
+  return { success: true, messageId };
+}
+```
+
+Add `streamMode?: 'off' | 'edit' | 'block'` to your channel config to let users control streaming behavior.
+
+---
+
 ## Common Pitfalls
 
 - **Rate limits**: Most platforms enforce rate limits. Implement queuing with backpressure in `send()`.

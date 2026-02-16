@@ -42,7 +42,12 @@ export interface DiscordConfig extends ChannelConfig {
   intents?: number;
   allowedGuilds?: string[];
   allowedUsers?: string[];
+  /** Streaming mode: 'off' (default), 'edit' (progressive edits), 'block' (wait then send). */
+  streamMode?: 'off' | 'edit' | 'block';
 }
+
+/** Minimum interval between message edits for streaming (Discord rate limit). */
+const DISCORD_EDIT_RATE_LIMIT_MS = 1_000;
 
 /** Discord Gateway opcodes. */
 const GatewayOp = {
@@ -123,6 +128,8 @@ export class DiscordChannel implements IChannel {
   private botUserId: string | null = null;
   private allowedGuilds: Set<string> = new Set();
   private allowedUsers: Set<string> = new Set();
+  private streamMode: 'off' | 'edit' | 'block' = 'off';
+  private lastEditTimestamps = new Map<string, number>();
 
   // -----------------------------------------------------------------------
   // IChannel implementation
@@ -140,6 +147,7 @@ export class DiscordChannel implements IChannel {
     this.intents = cfg.intents ?? DEFAULT_INTENTS;
     this.allowedGuilds = new Set(cfg.allowedGuilds ?? []);
     this.allowedUsers = new Set(cfg.allowedUsers ?? []);
+    this.streamMode = cfg.streamMode ?? 'off';
 
     // Verify the token.
     const me = await this.apiCall<{ id: string; username: string }>('/users/@me');
@@ -200,6 +208,47 @@ export class DiscordChannel implements IChannel {
         error: err instanceof Error ? err.message : String(err),
       };
     }
+  }
+
+  /**
+   * Edit a previously sent message. Used for progressive streaming updates.
+   * Rate-limited to avoid hitting Discord API limits.
+   */
+  async editMessage(to: Recipient, messageId: string, message: OutboundMessage): Promise<SendResult> {
+    const channelId = to.groupId ?? to.threadId ?? to.userId;
+    if (!channelId) {
+      return { success: false, error: 'Recipient must have groupId, threadId, or userId' };
+    }
+
+    // Rate limit: skip if we edited this message too recently.
+    const lastEdit = this.lastEditTimestamps.get(messageId);
+    const now = Date.now();
+    if (lastEdit && now - lastEdit < DISCORD_EDIT_RATE_LIMIT_MS) {
+      return { success: true, messageId }; // Silently skip — not an error.
+    }
+
+    try {
+      await this.apiCall<DiscordMessage>(
+        `/channels/${channelId}/messages/${messageId}`,
+        'PATCH',
+        { content: message.text },
+      );
+
+      this.lastEditTimestamps.set(messageId, now);
+      return { success: true, messageId };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  /**
+   * Get the current stream mode configuration.
+   */
+  getStreamMode(): 'off' | 'edit' | 'block' {
+    return this.streamMode;
   }
 
   onMessage(handler: (msg: InboundMessage) => void): void {

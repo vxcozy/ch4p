@@ -51,6 +51,21 @@ const {
       cb(null, '[]', '');
     },
   );
+  // Attach the Node.js custom promisify symbol so that `promisify(mockExecFileCb)`
+  // returns `{ stdout, stderr }` just like the real `child_process.execFile`.
+  // Without this, promisify's generic fallback resolves with only the first
+  // callback arg (a plain string), which breaks `const { stdout } = await ...`.
+  const PROMISIFY_CUSTOM = Symbol.for('nodejs.util.promisify.custom');
+  (mockExecFileCb as any)[PROMISIFY_CUSTOM] = (...args: unknown[]) =>
+    new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      mockExecFileCb(
+        ...(args as [string, string[]]),
+        (err: Error | null, stdout: string, stderr: string) => {
+          if (err) reject(err);
+          else resolve({ stdout, stderr });
+        },
+      );
+    });
   return { matrixMockClient, matrixAutoJoinSetup, mockExecFileCb };
 });
 
@@ -523,6 +538,260 @@ describe('TelegramChannel', () => {
     await expect(ch.start({ token: 'test-token', mode: 'webhook' }))
       .rejects.toThrow('webhookUrl');
   });
+
+  // -----------------------------------------------------------------------
+  // Webhook secret verification
+  // -----------------------------------------------------------------------
+
+  it('accepts webhook update with correct secret', async () => {
+    const mockFetch = createMockFetch([
+      { ok: true, data: { ok: true, result: { id: 123 } } },
+      { ok: true, data: { ok: true, result: true } },
+    ]);
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const ch = new TelegramChannel();
+    const received: InboundMessage[] = [];
+    ch.onMessage((msg) => received.push(msg));
+
+    await ch.start({ token: 'test-token', webhookSecret: 'my-secret-123' });
+
+    ch.handleWebhookUpdate(
+      {
+        update_id: 1,
+        message: {
+          message_id: 200,
+          from: { id: 999 },
+          chat: { id: 999, type: 'private' },
+          text: 'Valid secret',
+          date: Math.floor(Date.now() / 1000),
+        },
+      },
+      'my-secret-123', // Correct secret header.
+    );
+
+    expect(received).toHaveLength(1);
+    expect(received[0]!.text).toBe('Valid secret');
+
+    await ch.stop();
+  });
+
+  it('silently rejects webhook update with wrong secret', async () => {
+    const mockFetch = createMockFetch([
+      { ok: true, data: { ok: true, result: { id: 123 } } },
+      { ok: true, data: { ok: true, result: true } },
+    ]);
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const ch = new TelegramChannel();
+    const received: InboundMessage[] = [];
+    ch.onMessage((msg) => received.push(msg));
+
+    await ch.start({ token: 'test-token', webhookSecret: 'my-secret-123' });
+
+    ch.handleWebhookUpdate(
+      {
+        update_id: 1,
+        message: {
+          message_id: 201,
+          from: { id: 999 },
+          chat: { id: 999, type: 'private' },
+          text: 'Wrong secret',
+          date: Math.floor(Date.now() / 1000),
+        },
+      },
+      'wrong-secret', // Wrong secret header.
+    );
+
+    expect(received).toHaveLength(0); // Silently rejected.
+
+    await ch.stop();
+  });
+
+  it('silently rejects webhook update with missing secret header', async () => {
+    const mockFetch = createMockFetch([
+      { ok: true, data: { ok: true, result: { id: 123 } } },
+      { ok: true, data: { ok: true, result: true } },
+    ]);
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const ch = new TelegramChannel();
+    const received: InboundMessage[] = [];
+    ch.onMessage((msg) => received.push(msg));
+
+    await ch.start({ token: 'test-token', webhookSecret: 'my-secret-123' });
+
+    ch.handleWebhookUpdate(
+      {
+        update_id: 1,
+        message: {
+          message_id: 202,
+          from: { id: 999 },
+          chat: { id: 999, type: 'private' },
+          text: 'No secret header',
+          date: Math.floor(Date.now() / 1000),
+        },
+      },
+      // No secret header.
+    );
+
+    expect(received).toHaveLength(0);
+
+    await ch.stop();
+  });
+
+  it('skips webhook secret verification when no secret configured', async () => {
+    const mockFetch = createMockFetch([
+      { ok: true, data: { ok: true, result: { id: 123 } } },
+      { ok: true, data: { ok: true, result: true } },
+    ]);
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const ch = new TelegramChannel();
+    const received: InboundMessage[] = [];
+    ch.onMessage((msg) => received.push(msg));
+
+    await ch.start({ token: 'test-token' }); // No webhookSecret.
+
+    ch.handleWebhookUpdate(
+      {
+        update_id: 1,
+        message: {
+          message_id: 203,
+          from: { id: 999 },
+          chat: { id: 999, type: 'private' },
+          text: 'No secret configured',
+          date: Math.floor(Date.now() / 1000),
+        },
+      },
+      // Any or no header is fine.
+    );
+
+    expect(received).toHaveLength(1);
+    expect(received[0]!.text).toBe('No secret configured');
+
+    await ch.stop();
+  });
+
+  // -----------------------------------------------------------------------
+  // Numeric sender ID validation
+  // -----------------------------------------------------------------------
+
+  it('warns about non-numeric allowedUsers entries', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const mockFetch = createMockFetch([
+      { ok: true, data: { ok: true, result: { id: 123 } } },
+      { ok: true, data: { ok: true, result: true } },
+    ]);
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const ch = new TelegramChannel();
+    await ch.start({ token: 'test-token', allowedUsers: ['123456', 'john_doe', '789'] });
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('john_doe'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('not a numeric'));
+
+    warnSpy.mockRestore();
+    await ch.stop();
+  });
+
+  // -----------------------------------------------------------------------
+  // Stream mode
+  // -----------------------------------------------------------------------
+
+  it('exposes stream mode configuration', async () => {
+    const mockFetch = createMockFetch([
+      { ok: true, data: { ok: true, result: { id: 123 } } },
+      { ok: true, data: { ok: true, result: true } },
+    ]);
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const ch = new TelegramChannel();
+    await ch.start({ token: 'test-token', streamMode: 'edit' });
+
+    expect(ch.getStreamMode()).toBe('edit');
+
+    await ch.stop();
+  });
+
+  it('defaults stream mode to off', async () => {
+    const mockFetch = createMockFetch([
+      { ok: true, data: { ok: true, result: { id: 123 } } },
+      { ok: true, data: { ok: true, result: true } },
+    ]);
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const ch = new TelegramChannel();
+    await ch.start({ token: 'test-token' });
+
+    expect(ch.getStreamMode()).toBe('off');
+
+    await ch.stop();
+  });
+
+  // -----------------------------------------------------------------------
+  // Telegram editMessage
+  // -----------------------------------------------------------------------
+
+  it('editMessage calls editMessageText API', async () => {
+    const mockFetch = createMockFetch([
+      { ok: true, data: { ok: true, result: { id: 123 } } }, // getMe
+      { ok: true, data: { ok: true, result: true } },         // deleteWebhook
+      { ok: true, data: { ok: true, result: { message_id: 42 } } }, // editMessageText
+    ]);
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const ch = new TelegramChannel();
+    await ch.start({ token: 'test-token' });
+
+    const result = await ch.editMessage(
+      { channelId: 'telegram', userId: '12345' },
+      '42',
+      { text: 'Updated text' },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.messageId).toBe('42');
+
+    // Verify editMessageText was called.
+    const editCall = mockFetch.mock.calls.find(
+      (c) => (c[0] as string).includes('editMessageText'),
+    );
+    expect(editCall).toBeDefined();
+
+    await ch.stop();
+  });
+
+  it('editMessage returns error without recipient', async () => {
+    const mockFetch = createMockFetch([
+      { ok: true, data: { ok: true, result: { id: 123 } } },
+      { ok: true, data: { ok: true, result: true } },
+    ]);
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const ch = new TelegramChannel();
+    await ch.start({ token: 'test-token' });
+
+    const result = await ch.editMessage(
+      { channelId: 'telegram' },
+      '42',
+      { text: 'No recipient' },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('userId or groupId');
+
+    await ch.stop();
+  });
+
+  // -----------------------------------------------------------------------
+  // WEBHOOK_TIMEOUT_MS static getter
+  // -----------------------------------------------------------------------
+
+  it('exposes WEBHOOK_TIMEOUT_MS static getter', () => {
+    expect(TelegramChannel.WEBHOOK_TIMEOUT_MS).toBe(8_000);
+  });
 });
 
 // ===========================================================================
@@ -579,6 +848,32 @@ describe('DiscordChannel', () => {
       { channelId: 'discord' },
       { text: 'test' },
     );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('groupId');
+  });
+
+  // -----------------------------------------------------------------------
+  // Discord stream mode
+  // -----------------------------------------------------------------------
+
+  it('exposes stream mode configuration', () => {
+    const ch = new DiscordChannel();
+    // Before start, streamMode defaults to 'off'.
+    expect(ch.getStreamMode()).toBe('off');
+  });
+
+  // -----------------------------------------------------------------------
+  // Discord editMessage
+  // -----------------------------------------------------------------------
+
+  it('editMessage returns error without recipient', async () => {
+    const ch = new DiscordChannel();
+    const result = await ch.editMessage(
+      { channelId: 'discord' },
+      'msg-1',
+      { text: 'Edited text' },
+    );
+
     expect(result.success).toBe(false);
     expect(result.error).toContain('groupId');
   });
@@ -1820,5 +2115,314 @@ describe('IMessageChannel', () => {
     const ch = new IMessageChannel();
     await expect(ch.start({ dbPath: '/nonexistent/chat.db' }))
       .rejects.toThrow('Cannot read iMessage database');
+  });
+
+  // -----------------------------------------------------------------------
+  // Tapback reaction detection
+  // -----------------------------------------------------------------------
+
+  it('detects tapback love reaction from polled messages', async () => {
+    // Set up the mock. Use queueMicrotask for the poll callback to ensure
+    // the promisified execFile resolves properly.
+    let pollCallCount = 0;
+    mockExecFileCb.mockImplementation(
+      (cmd: string, args: string[], cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+        if (cmd === 'which') {
+          queueMicrotask(() => cb(null, '/usr/bin/sqlite3', ''));
+          return;
+        }
+        if (cmd === 'sqlite3') {
+          const fullArgs = args.join(' ');
+          if (fullArgs.includes('MAX(ROWID)')) {
+            queueMicrotask(() => cb(null, JSON.stringify([{ max_id: 100 }]), ''));
+            return;
+          }
+          if (fullArgs.includes('SELECT 1')) {
+            queueMicrotask(() => cb(null, '1', ''));
+            return;
+          }
+          if (fullArgs.includes('ROWID >')) {
+            pollCallCount++;
+            if (pollCallCount === 1) {
+              const reactionRow = {
+                ROWID: 101,
+                text: '',
+                date: 694000000000000000,
+                handle: '+15551234567',
+                is_from_me: 0,
+                cache_has_attachments: 0,
+                associated_message_type: 2000,
+                associated_message_guid: 'p:0/AABB-CCDD-EEFF',
+                thread_originator_guid: null,
+                destination_caller_id: null,
+                chat_identifier: 'chat123456',
+                display_name: 'Family Group',
+              };
+              queueMicrotask(() => cb(null, JSON.stringify([reactionRow]), ''));
+            } else {
+              queueMicrotask(() => cb(null, '[]', ''));
+            }
+            return;
+          }
+          queueMicrotask(() => cb(null, '[]', ''));
+          return;
+        }
+        queueMicrotask(() => cb(null, '', ''));
+      },
+    );
+
+    const ch = new IMessageChannel();
+    const received: InboundMessage[] = [];
+    ch.onMessage((msg) => received.push(msg));
+
+    await ch.start({ dbPath: '/tmp/test-chat.db', pollInterval: 50 });
+
+    // Wait for poll cycles to fire.
+    for (let i = 0; i < 40 && received.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    expect(pollCallCount).toBeGreaterThan(0);
+    expect(received.length).toBeGreaterThanOrEqual(1);
+    const reaction = received[0]!;
+    expect(reaction.text).toContain('love reaction');
+    expect(reaction.raw).toBeDefined();
+    expect((reaction.raw as Record<string, unknown>).reaction).toBe(true);
+    expect((reaction.raw as Record<string, unknown>).reactionType).toBe('love');
+    expect(reaction.replyTo).toBe('AABB-CCDD-EEFF'); // GUID with p:0/ prefix stripped.
+
+    await ch.stop();
+  });
+
+  // -----------------------------------------------------------------------
+  // Group ID from chat_identifier
+  // -----------------------------------------------------------------------
+
+  it('sets groupId from chat_identifier for group chats', async () => {
+    let pollCallCount = 0;
+    mockExecFileCb.mockImplementation(
+      (cmd: string, args: string[], cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+        if (cmd === 'which') {
+          queueMicrotask(() => cb(null, '/usr/bin/sqlite3', ''));
+          return;
+        }
+        if (cmd === 'sqlite3') {
+          const fullArgs = args.join(' ');
+          if (fullArgs.includes('MAX(ROWID)')) {
+            queueMicrotask(() => cb(null, JSON.stringify([{ max_id: 100 }]), ''));
+            return;
+          }
+          if (fullArgs.includes('SELECT 1')) {
+            queueMicrotask(() => cb(null, '1', ''));
+            return;
+          }
+          if (fullArgs.includes('ROWID >')) {
+            pollCallCount++;
+            if (pollCallCount === 1) {
+              const row = {
+                ROWID: 101,
+                text: 'Hello group!',
+                date: 694000000000000000,
+                handle: '+15551234567',
+                is_from_me: 0,
+                cache_has_attachments: 0,
+                associated_message_type: 0,
+                associated_message_guid: null,
+                thread_originator_guid: null,
+                destination_caller_id: '+15559876543',
+                chat_identifier: 'chat999888777',
+                display_name: 'Work Chat',
+              };
+              queueMicrotask(() => cb(null, JSON.stringify([row]), ''));
+            } else {
+              queueMicrotask(() => cb(null, '[]', ''));
+            }
+            return;
+          }
+          queueMicrotask(() => cb(null, '[]', ''));
+          return;
+        }
+        queueMicrotask(() => cb(null, '', ''));
+      },
+    );
+
+    const ch = new IMessageChannel();
+    const received: InboundMessage[] = [];
+    ch.onMessage((msg) => received.push(msg));
+
+    await ch.start({ dbPath: '/tmp/test-chat.db', pollInterval: 50 });
+
+    for (let i = 0; i < 40 && received.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    expect(received.length).toBeGreaterThanOrEqual(1);
+    const msg = received[0]!;
+    expect(msg.from.groupId).toBe('chat999888777');
+    expect(msg.text).toBe('Hello group!');
+
+    await ch.stop();
+  });
+
+  // -----------------------------------------------------------------------
+  // Thread context from thread_originator_guid
+  // -----------------------------------------------------------------------
+
+  it('sets replyTo from thread_originator_guid', async () => {
+    let pollCallCount = 0;
+    mockExecFileCb.mockImplementation(
+      (cmd: string, args: string[], cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+        if (cmd === 'which') {
+          queueMicrotask(() => cb(null, '/usr/bin/sqlite3', ''));
+          return;
+        }
+        if (cmd === 'sqlite3') {
+          const fullArgs = args.join(' ');
+          if (fullArgs.includes('MAX(ROWID)')) {
+            queueMicrotask(() => cb(null, JSON.stringify([{ max_id: 100 }]), ''));
+            return;
+          }
+          if (fullArgs.includes('SELECT 1')) {
+            queueMicrotask(() => cb(null, '1', ''));
+            return;
+          }
+          if (fullArgs.includes('ROWID >')) {
+            pollCallCount++;
+            if (pollCallCount === 1) {
+              const row = {
+                ROWID: 101,
+                text: 'Thread reply',
+                date: 694000000000000000,
+                handle: '+15551234567',
+                is_from_me: 0,
+                cache_has_attachments: 0,
+                associated_message_type: 0,
+                associated_message_guid: null,
+                thread_originator_guid: 'ORIG-GUID-12345',
+                destination_caller_id: null,
+                chat_identifier: '+15559999999',
+                display_name: null,
+              };
+              queueMicrotask(() => cb(null, JSON.stringify([row]), ''));
+            } else {
+              queueMicrotask(() => cb(null, '[]', ''));
+            }
+            return;
+          }
+          queueMicrotask(() => cb(null, '[]', ''));
+          return;
+        }
+        queueMicrotask(() => cb(null, '', ''));
+      },
+    );
+
+    const ch = new IMessageChannel();
+    const received: InboundMessage[] = [];
+    ch.onMessage((msg) => received.push(msg));
+
+    await ch.start({ dbPath: '/tmp/test-chat.db', pollInterval: 50 });
+
+    for (let i = 0; i < 40 && received.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    expect(received.length).toBeGreaterThanOrEqual(1);
+    const msg = received[0]!;
+    expect(msg.replyTo).toBe('ORIG-GUID-12345');
+    expect(msg.text).toBe('Thread reply');
+    expect(msg.from.groupId).toBeUndefined();
+
+    await ch.stop();
+  });
+
+  // -----------------------------------------------------------------------
+  // Destination caller ID and display name in raw metadata
+  // -----------------------------------------------------------------------
+
+  it('includes destination_caller_id and display_name in raw metadata', async () => {
+    let pollCallCount = 0;
+    mockExecFileCb.mockImplementation(
+      (cmd: string, args: string[], cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+        if (cmd === 'which') {
+          queueMicrotask(() => cb(null, '/usr/bin/sqlite3', ''));
+          return;
+        }
+        if (cmd === 'sqlite3') {
+          const fullArgs = args.join(' ');
+          if (fullArgs.includes('MAX(ROWID)')) {
+            queueMicrotask(() => cb(null, JSON.stringify([{ max_id: 100 }]), ''));
+            return;
+          }
+          if (fullArgs.includes('SELECT 1')) {
+            queueMicrotask(() => cb(null, '1', ''));
+            return;
+          }
+          if (fullArgs.includes('ROWID >')) {
+            pollCallCount++;
+            if (pollCallCount === 1) {
+              const row = {
+                ROWID: 101,
+                text: 'Metadata test',
+                date: 694000000000000000,
+                handle: '+15551234567',
+                is_from_me: 0,
+                cache_has_attachments: 0,
+                associated_message_type: 0,
+                associated_message_guid: null,
+                thread_originator_guid: null,
+                destination_caller_id: '+15559876543',
+                chat_identifier: 'chat555444333',
+                display_name: 'Best Friends',
+              };
+              queueMicrotask(() => cb(null, JSON.stringify([row]), ''));
+            } else {
+              queueMicrotask(() => cb(null, '[]', ''));
+            }
+            return;
+          }
+          queueMicrotask(() => cb(null, '[]', ''));
+          return;
+        }
+        queueMicrotask(() => cb(null, '', ''));
+      },
+    );
+
+    const ch = new IMessageChannel();
+    const received: InboundMessage[] = [];
+    ch.onMessage((msg) => received.push(msg));
+
+    await ch.start({ dbPath: '/tmp/test-chat.db', pollInterval: 50 });
+
+    for (let i = 0; i < 40 && received.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    expect(received.length).toBeGreaterThanOrEqual(1);
+    const msg = received[0]!;
+    const raw = msg.raw as Record<string, unknown>;
+    expect(raw.destination_caller_id).toBe('+15559876543');
+    expect(raw.display_name).toBe('Best Friends');
+
+    await ch.stop();
+  });
+
+  // -----------------------------------------------------------------------
+  // sendReaction stub
+  // -----------------------------------------------------------------------
+
+  it('sendReaction returns not-yet-supported error', async () => {
+    const ch = new IMessageChannel();
+    await ch.start({ dbPath: '/tmp/test-chat.db' });
+
+    const result = await ch.sendReaction(
+      { channelId: 'imessage', userId: '+15551234567' },
+      'GUID-123',
+      'love',
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not yet supported');
+
+    await ch.stop();
   });
 });

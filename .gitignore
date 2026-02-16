@@ -4,6 +4,7 @@ dist-bundle/
 coverage/
 *.tsbuildinfo
 .env
+.env.*
 .env.local
 .env.*.local
 .DS_Store

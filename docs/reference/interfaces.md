@@ -84,11 +84,18 @@ interface IChannel {
   start(config: ChannelConfig): Promise<void>;
   stop(): Promise<void>;
   send(to: Recipient, message: OutboundMessage): Promise<SendResult>;
+  editMessage?(to: Recipient, messageId: string, message: OutboundMessage): Promise<SendResult>;
   onMessage(handler: (msg: InboundMessage) => void): void;
   onPresence?(handler: (event: PresenceEvent) => void): void;
   isHealthy(): Promise<boolean>;
 }
 ```
+
+### Edit-Based Streaming
+
+Channels that support `editMessage()` enable progressive streaming — the agent's response is updated in-place as it streams from the LLM, rather than waiting for the full answer. The gateway's `StreamHandler` detects this capability automatically via `typeof channel.editMessage === 'function'`.
+
+Currently supported by: **Telegram** and **Discord**. Both implement rate limiting (1 edit/second) to stay within platform API limits.
 
 ### Types
 
