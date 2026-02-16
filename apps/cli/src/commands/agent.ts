@@ -14,17 +14,21 @@
  */
 
 import * as readline from 'node:readline';
-import type { Ch4pConfig, IEngine, SessionConfig } from '@ch4p/core';
+import type { Ch4pConfig, IEngine, IMemoryBackend, ISecurityPolicy, SessionConfig } from '@ch4p/core';
 import { generateId } from '@ch4p/core';
 import { NativeEngine, createClaudeCliEngine, createCodexCliEngine, SubprocessEngine } from '@ch4p/engines';
 import type { SubprocessEngineConfig } from '@ch4p/engines';
 import { ProviderRegistry } from '@ch4p/providers';
 import { Session, AgentLoop } from '@ch4p/agent';
 import type { AgentEvent } from '@ch4p/agent';
-import { ToolRegistry } from '@ch4p/tools';
-import { NoopObserver } from '@ch4p/observability';
+import { ToolRegistry, LoadSkillTool } from '@ch4p/tools';
+import { createObserver } from '@ch4p/observability';
+import type { ObservabilityConfig } from '@ch4p/observability';
+import { createMemoryBackend } from '@ch4p/memory';
+import type { MemoryConfig } from '@ch4p/memory';
+import { DefaultSecurityPolicy } from '@ch4p/security';
 import { SkillRegistry } from '@ch4p/skills';
-import { loadConfig } from '../config.js';
+import { loadConfig, getLogsDir } from '../config.js';
 import { playBriefSplash } from './splash.js';
 
 // ---------------------------------------------------------------------------
@@ -298,7 +302,7 @@ function createSessionConfig(config: Ch4pConfig, skillRegistry?: SkillRegistry):
       .map((s) => `  - ${s.name}: ${s.description}`)
       .join('\n');
     systemPrompt +=
-      '\n\nAvailable skills (ask to load one for detailed instructions):\n' + descriptions;
+      '\n\nAvailable skills (use the `load_skill` tool with the skill name to get full instructions):\n' + descriptions;
   }
 
   return {
@@ -333,31 +337,98 @@ function createSkillRegistry(config: Ch4pConfig): SkillRegistry {
  * autonomy mode. Memory tools are always included — the backend may or
  * may not be wired, but the tools validate gracefully.
  */
-function createToolRegistry(config: Ch4pConfig): ToolRegistry {
-  if (config.autonomy.level === 'readonly') {
-    return ToolRegistry.createDefault({
-      exclude: ['bash', 'file_write', 'file_edit', 'delegate'],
-    });
+function createToolRegistry(config: Ch4pConfig, skillRegistry?: SkillRegistry): ToolRegistry {
+  const registry = config.autonomy.level === 'readonly'
+    ? ToolRegistry.createDefault({
+        exclude: ['bash', 'file_write', 'file_edit', 'delegate'],
+      })
+    : ToolRegistry.createDefault();
+
+  // Register the load_skill tool when skills are available.
+  // This enables progressive disclosure: the agent sees skill names in its
+  // system prompt and can load full instructions on-demand.
+  if (skillRegistry && skillRegistry.size > 0) {
+    registry.register(new LoadSkillTool(skillRegistry));
   }
-  return ToolRegistry.createDefault();
+
+  return registry;
 }
 
 /**
- * Create a full AgentLoop wired with engine, tools, and observer.
+ * Create a memory backend from config.
+ * Falls back to NoopMemoryBackend on any error so the agent always boots.
+ */
+function createMemory(config: Ch4pConfig): IMemoryBackend | undefined {
+  try {
+    const memCfg: MemoryConfig = {
+      backend: config.memory.backend,
+      vectorWeight: config.memory.vectorWeight,
+      keywordWeight: config.memory.keywordWeight,
+      embeddingProvider: config.memory.embeddingProvider,
+    };
+    const backend = createMemoryBackend(memCfg);
+    return backend;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.log(`  ${YELLOW}⚠ Memory backend failed to initialise: ${message}${RESET}`);
+    console.log(`  ${DIM}Memory tools will be unavailable this session.${RESET}\n`);
+    return undefined;
+  }
+}
+
+/**
+ * Create an observer from config.
+ * Falls back to the factory default (NoopObserver) on error.
+ */
+function createConfiguredObserver(config: Ch4pConfig) {
+  try {
+    const obsCfg: ObservabilityConfig = {
+      observers: config.observability.observers ?? ['console'],
+      logLevel: config.observability.logLevel ?? 'info',
+      logPath: `${getLogsDir()}/ch4p.jsonl`,
+    };
+    return createObserver(obsCfg);
+  } catch {
+    // Factory failure — fall back to console-only.
+    return createObserver({ observers: ['console'], logLevel: 'info' });
+  }
+}
+
+/**
+ * Create a security policy from config.
+ * Scopes filesystem access to the session cwd, enforces command allowlist,
+ * and respects the configured autonomy level.
+ */
+function createSecurityPolicy(config: Ch4pConfig, cwd: string): ISecurityPolicy {
+  return new DefaultSecurityPolicy({
+    workspace: cwd,
+    autonomyLevel: config.autonomy.level,
+    allowedCommands: config.autonomy.allowedCommands,
+    blockedPaths: config.security.blockedPaths,
+  });
+}
+
+/**
+ * Create a full AgentLoop wired with engine, tools, observer, memory, and security.
  */
 function createAgentLoop(
   config: Ch4pConfig,
   engine: IEngine,
   sessionConfig: SessionConfig,
+  memoryBackend?: IMemoryBackend,
+  skillRegistry?: SkillRegistry,
 ): AgentLoop {
   const session = new Session(sessionConfig);
-  const tools = createToolRegistry(config);
-  const observer = new NoopObserver();
+  const tools = createToolRegistry(config, skillRegistry);
+  const observer = createConfiguredObserver(config);
+  const securityPolicy = createSecurityPolicy(config, sessionConfig.cwd ?? process.cwd());
 
   return new AgentLoop(session, engine, tools.list(), observer, {
     maxIterations: 50,
     maxRetries: 3,
     enableStateSnapshots: true,
+    memoryBackend,
+    securityPolicy,
   });
 }
 
@@ -370,8 +441,10 @@ async function runAgentMessage(
   engine: IEngine,
   sessionConfig: SessionConfig,
   message: string,
+  memoryBackend?: IMemoryBackend,
+  skillRegistry?: SkillRegistry,
 ): Promise<void> {
-  const loop = createAgentLoop(config, engine, sessionConfig);
+  const loop = createAgentLoop(config, engine, sessionConfig, memoryBackend, skillRegistry);
 
   for await (const event of loop.run(message)) {
     handleAgentEvent(event);
@@ -403,6 +476,7 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
   const skillRegistry = createSkillRegistry(config);
   const sessionConfig = createSessionConfig(config, skillRegistry);
   const tools = createToolRegistry(config);
+  const memoryBackend = createMemory(config);
 
   // Brief splash animation (TTY only).
   if (process.stdout.isTTY) {
@@ -412,6 +486,7 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
   console.log(`  ${DIM}Interactive mode. Type ${CYAN}/help${DIM} for commands, ${CYAN}/exit${DIM} to quit.${RESET}`);
   console.log(`  ${DIM}Engine: ${engine.name} | Model: ${config.agent.model} | Autonomy: ${config.autonomy.level}${RESET}`);
   console.log(`  ${DIM}Tools: ${tools.names().join(', ')}${RESET}`);
+  console.log(`  ${DIM}Memory: ${memoryBackend ? config.memory.backend : 'disabled'}${RESET}`);
   if (skillRegistry.size > 0) {
     console.log(`  ${DIM}Skills: ${skillRegistry.names().join(', ')}${RESET}`);
   }
@@ -479,6 +554,7 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
         case '/memory':
           console.log(`\n  ${BOLD}Memory Status${RESET}`);
           console.log(`  ${DIM}Backend: ${config.memory.backend}${RESET}`);
+          console.log(`  ${DIM}Active: ${memoryBackend ? `${GREEN}yes${RESET}` : `${YELLOW}no (failed to initialise)${RESET}`}`);
           console.log(`  ${DIM}Auto-save: ${config.memory.autoSave}${RESET}`);
           console.log(`  ${DIM}Vector weight: ${config.memory.vectorWeight ?? 0.7}${RESET}`);
           console.log(`  ${DIM}Keyword weight: ${config.memory.keywordWeight ?? 0.3}${RESET}\n`);
@@ -523,7 +599,7 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
     // Run the message through the full AgentLoop pipeline.
     console.log('');
     try {
-      await runAgentMessage(config, engine, sessionConfig, input);
+      await runAgentMessage(config, engine, sessionConfig, input, memoryBackend, skillRegistry);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`\n  ${RED}Error:${RESET} ${message}`);
@@ -541,9 +617,10 @@ async function runSingleMessage(config: Ch4pConfig, message: string): Promise<vo
   const engine = createEngine(config);
   const skillRegistry = createSkillRegistry(config);
   const sessionConfig = createSessionConfig(config, skillRegistry);
+  const memoryBackend = createMemory(config);
 
   try {
-    await runAgentMessage(config, engine, sessionConfig, message);
+    await runAgentMessage(config, engine, sessionConfig, message, memoryBackend, skillRegistry);
     console.log('');
   } catch (err) {
     const errMessage = err instanceof Error ? err.message : String(err);

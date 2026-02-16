@@ -19,6 +19,7 @@ export { MemoryStoreTool } from './memory-store.js';
 export { MemoryRecallTool } from './memory-recall.js';
 export { DelegateTool } from './delegate.js';
 export { McpClientTool } from './mcp-client.js';
+export { LoadSkillTool } from './load-skill.js';
 
 // Registry
 export { ToolRegistry } from './registry.js';
@@ -30,3 +31,4 @@ export { captureFileState } from './snapshot-utils.js';
 export type { MemoryToolContext } from './memory-store.js';
 export type { DelegateToolContext } from './delegate.js';
 export type { McpServerConfig, McpTransport } from './mcp-client.js';
+export type { SkillProvider } from './load-skill.js';

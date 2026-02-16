@@ -35,6 +35,7 @@ import type {
   IObserver,
   IVerifier,
   IMemoryBackend,
+  ISecurityPolicy,
   ToolResult,
   ToolContext,
   ToolCall,
@@ -90,6 +91,9 @@ export interface AgentLoopOpts {
   /** Optional memory backend. When provided, it is injected into the
    *  ToolContext so memory_store and memory_recall tools can access it. */
   memoryBackend?: IMemoryBackend;
+  /** Optional security policy. When provided, tools use it for path/command
+   *  validation. When absent, a permissive no-op policy is used. */
+  securityPolicy?: ISecurityPolicy;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +106,24 @@ interface ToolStateRecord {
   before?: StateSnapshot;
   after?: StateSnapshot;
 }
+
+// ---------------------------------------------------------------------------
+// Permissive fallback security policy (used when none is configured)
+// ---------------------------------------------------------------------------
+
+/** Allows all operations — used only when the caller does not provide a
+ *  `securityPolicy` option. This ensures backward compatibility while the
+ *  security layer is opt-in during development. In production the CLI should
+ *  always pass a real `DefaultSecurityPolicy`. */
+const PERMISSIVE_POLICY: ISecurityPolicy = {
+  autonomyLevel: 'full',
+  validatePath: (_path, _op) => ({ allowed: true }),
+  validateCommand: (_cmd, _args) => ({ allowed: true }),
+  requiresConfirmation: () => false,
+  audit: () => [],
+  sanitizeOutput: (text) => ({ clean: text, redacted: false }),
+  validateInput: () => ({ safe: true, threats: [] }),
+};
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -125,10 +147,11 @@ export class AgentLoop {
   private readonly tools: Map<string, ITool>;
   private readonly toolDefs: ToolDefinition[];
   private readonly observer: IObserver;
-  private readonly opts: Required<Omit<AgentLoopOpts, 'verifier' | 'enableStateSnapshots' | 'memoryBackend'>> & {
+  private readonly opts: Required<Omit<AgentLoopOpts, 'verifier' | 'enableStateSnapshots' | 'memoryBackend' | 'securityPolicy'>> & {
     verifier?: IVerifier;
     enableStateSnapshots: boolean;
     memoryBackend?: IMemoryBackend;
+    securityPolicy?: ISecurityPolicy;
   };
 
   private abortController: AbortController | null = null;
@@ -161,6 +184,7 @@ export class AgentLoop {
       verifier: opts.verifier,
       enableStateSnapshots: opts.enableStateSnapshots ?? true,
       memoryBackend: opts.memoryBackend,
+      securityPolicy: opts.securityPolicy,
     };
 
     if (opts.workerPool) {
@@ -657,7 +681,7 @@ export class AgentLoop {
     const toolContext: ToolContext & { memoryBackend?: IMemoryBackend } = {
       sessionId: this.session.getId(),
       cwd: this.session.getConfig().cwd ?? process.cwd(),
-      securityPolicy: null as never, // Injected by the security layer at a higher level.
+      securityPolicy: this.opts.securityPolicy ?? PERMISSIVE_POLICY,
       abortSignal: signal,
       onProgress: (_update: string) => {
         // Progress updates are emitted inline for lightweight tools.

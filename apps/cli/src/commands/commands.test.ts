@@ -338,14 +338,12 @@ describe('tools command', () => {
     await tools();
 
     const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('read_file');
-    expect(output).toContain('write_file');
+    expect(output).toContain('file_read');
+    expect(output).toContain('file_write');
     expect(output).toContain('bash');
-    expect(output).toContain('git');
     expect(output).toContain('grep');
     expect(output).toContain('memory_store');
     expect(output).toContain('memory_recall');
-    expect(output).toContain('browser');
     expect(output).toContain('delegate');
 
     consoleSpy.mockRestore();
@@ -369,7 +367,7 @@ describe('tools command', () => {
     await tools();
 
     const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('12 tools');
+    expect(output).toContain('10 tools');
 
     consoleSpy.mockRestore();
   });

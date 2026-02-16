@@ -50,63 +50,85 @@ Copy this token. You will need it in the next step.
 
 ---
 
-## Step 2: Add the Token to Configuration
+## Step 2: Store the Token Securely
 
-Open your ch4p configuration file:
+Create (or edit) your secrets file at `~/.ch4p/.env`:
 
 ```bash
-ch4p agent --edit-config
+echo 'TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN_HERE' >> ~/.ch4p/.env
+chmod 600 ~/.ch4p/.env
 ```
 
-This opens `~/.ch4p/config.json` in your default editor. Add a `channels` section with Telegram configured:
+This keeps your token out of configuration files and version control.
+
+---
+
+## Step 3: Add Telegram to Configuration
+
+Edit `~/.ch4p/config.json` and add a `channels` section. Reference the token via the environment variable:
 
 ```json
 {
-  "agent": {
-    "name": "ch4p"
-  },
-  "engine": {
-    "provider": "anthropic",
-    "apiKey": "sk-ant-xxxxx"
+  "engines": {
+    "default": "claude-cli"
   },
   "channels": {
     "telegram": {
-      "enabled": true,
-      "token": "YOUR_BOT_TOKEN_HERE",
+      "token": "${TELEGRAM_BOT_TOKEN}",
+      "mode": "polling",
+      "pollInterval": 1000,
       "allowedUsers": []
     }
+  },
+  "gateway": {
+    "port": 18789,
+    "requirePairing": false,
+    "allowPublicBind": false
   }
 }
 ```
 
-Setting `allowedUsers` to an empty array means anyone can message the bot for now. In production, you would restrict this to specific Telegram user IDs.
+Setting `allowedUsers` to an empty array means anyone can message the bot for now. In production, restrict this to specific Telegram user IDs (e.g., `["497131680"]`).
 
 Save and close the file.
 
 ---
 
-## Step 3: Start the Gateway
+## Step 4: Start the Gateway
 
-The gateway is the process that manages external channel connections. Start it alongside the agent:
+Source your secrets, then start the gateway:
 
 ```bash
-ch4p gateway
+export $(cat ~/.ch4p/.env | xargs) && ch4p gateway
 ```
 
 You will see the gateway boot with the Telegram channel:
 
 ```
-[gateway] Starting gateway...
-[gateway] Channel: telegram (polling mode)
-[gateway] Telegram bot @ch4p_assistant_bot connected
-[gateway] Agent "ch4p" ready on 1 channel.
+  ch4p Gateway
+  ==================================================
+
+  Server listening on 127.0.0.1:18789
+  Pairing       disabled
+  Engine        claude-cli
+  Memory        disabled
+
+  Routes:
+    GET    /health              - liveness probe
+    POST   /sessions            - create a new session
+    ...
+
+  Channels:
+    telegram    polling     started
+
+  ch4p gateway ready — 1 channel active.
 ```
 
 The gateway is now running. It polls Telegram for incoming messages and routes them to the agent.
 
 ---
 
-## Step 4: Send a Message from Telegram
+## Step 5: Send a Message from Telegram
 
 Open Telegram and search for your bot by its username (`@ch4p_assistant_bot`). Start a conversation and send:
 
@@ -114,63 +136,23 @@ Open Telegram and search for your bot by its username (`@ch4p_assistant_bot`). S
 Hello from Telegram!
 ```
 
-In your terminal, you will see the message arrive:
-
-```
-[telegram] Message from user 98765432: "Hello from Telegram!"
-[agent] Processing message...
-[agent] Response sent to telegram:98765432
-```
-
-In Telegram, you will see the agent's response appear as a message from the bot:
-
-```
-ch4p Assistant: Hello! I'm receiving your message through Telegram.
-                   How can I help you today?
-```
-
----
-
-## Step 5: Test a Tool Execution
-
-Send another message from Telegram:
-
-```
-What time is it?
-```
-
-If the agent has access to a time/date tool, it will execute it and respond. In `supervised` autonomy mode, the terminal shows the approval prompt:
-
-```
-[telegram] Message from user 98765432: "What time is it?"
-[agent] Tool requested: system.datetime
-[agent] Auto-approved (read-only tool)
-[telegram] Response sent.
-```
-
-Read-only tools like `system.datetime` are auto-approved even in supervised mode. You will see the time appear as a response in Telegram.
+In your terminal, you will see the message arrive and the agent process it. In Telegram, the bot replies with the agent's response.
 
 ---
 
 ## Step 6: Stop the Gateway
 
-Press `Ctrl+C` in the terminal:
-
-```
-[gateway] Shutting down...
-[gateway] Telegram bot disconnected.
-[gateway] Gateway stopped.
-```
+Press `Ctrl+C` in the terminal. The gateway performs a graceful shutdown, disconnecting all channels cleanly.
 
 ---
 
 ## What You Learned
 
 1. **BotFather** — Telegram bots are created through BotFather, which gives you a token.
-2. **Configuration** — Channel tokens go in the `channels` section of `config.json`.
-3. **Gateway** — `ch4p gateway` manages all external channel connections.
-4. **Routing** — Messages flow from Telegram through the gateway to the agent and back.
-5. **Autonomy** — Read-only tools execute without manual approval, even in supervised mode.
+2. **Secrets management** — Tokens go in `~/.ch4p/.env`, referenced via `${VAR_NAME}` in config.
+3. **Configuration** — Channel settings go in the `channels` section of `config.json`.
+4. **Gateway** — `ch4p gateway` manages all external channel connections.
+5. **Routing** — Messages flow from Telegram through the gateway to the agent and back.
 
 ---
 

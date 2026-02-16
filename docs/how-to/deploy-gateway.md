@@ -1,6 +1,6 @@
 # How to Deploy the Gateway
 
-This guide covers deploying the ch4p gateway with a tunnel so external messaging channels (Telegram, Discord, Slack, etc.) can reach your agent.
+This guide covers deploying the ch4p gateway so external messaging channels (Telegram, Discord, Slack, etc.) can reach your agent.
 
 ---
 
@@ -12,19 +12,46 @@ This guide covers deploying the ch4p gateway with a tunnel so external messaging
 
 ---
 
-## Start the Gateway in Production Mode
+## Start the Gateway
 
-Run the gateway with the `--production` flag:
+Run the gateway:
 
 ```bash
-ch4p gateway --production
+ch4p gateway
 ```
 
-Production mode enables:
-- Automatic reconnection on channel disconnects
-- Structured JSON logging to `~/.ch4p/logs/gateway.log`
-- Process supervision (restarts on crash)
-- Graceful shutdown on SIGTERM
+The gateway starts the HTTP server, connects all configured channels, and begins routing messages to the agent. You will see:
+
+```
+  ch4p Gateway
+  ==================================================
+
+  Server listening on 127.0.0.1:18789
+  Pairing       disabled
+  Engine        claude-cli
+  Memory        disabled
+
+  Routes:
+    GET    /health              - liveness probe
+    POST   /pair                - exchange pairing code for token
+    GET    /sessions            - list active sessions
+    POST   /sessions            - create a new session
+    GET    /sessions/:id        - get session details
+    POST   /sessions/:id/steer  - inject message into session
+    DELETE /sessions/:id        - end a session
+
+  Channels:
+    telegram    polling     started
+    discord     websocket   started
+```
+
+### Override the Port
+
+Pass `--port` to override the configured port:
+
+```bash
+ch4p gateway --port 9000
+```
 
 ---
 
@@ -32,32 +59,12 @@ Production mode enables:
 
 Webhook-based channels (Slack, some Telegram modes) require a publicly accessible URL. Use a tunnel to expose your local gateway.
 
-### Option A: Built-in Tunnel
-
-ch4p includes a built-in tunnel powered by a lightweight relay:
-
-```bash
-ch4p gateway --tunnel
-```
-
-Output:
-
-```
-[gateway] Starting gateway...
-[gateway] Tunnel established: https://abc123.ch4p.dev
-[gateway] Webhook URL: https://abc123.ch4p.dev/webhooks
-[gateway] Channels: telegram, slack
-[gateway] Ready.
-```
-
-The tunnel URL is stable for the lifetime of the process. Configure it as your webhook URL in each platform's settings.
-
-### Option B: Cloudflare Tunnel
+### Option A: Cloudflare Tunnel
 
 For persistent deployments, use Cloudflare Tunnel:
 
 ```bash
-cloudflared tunnel --url http://localhost:3847
+cloudflared tunnel --url http://localhost:18789
 ```
 
 Then set the webhook base URL in config:
@@ -65,13 +72,13 @@ Then set the webhook base URL in config:
 ```json
 {
   "gateway": {
-    "port": 3847,
+    "port": 18789,
     "webhookBaseUrl": "https://your-tunnel.trycloudflare.com"
   }
 }
 ```
 
-### Option C: Reverse Proxy
+### Option B: Reverse Proxy
 
 If your machine has a public IP and domain, use a reverse proxy:
 
@@ -81,7 +88,7 @@ server {
     server_name ch4p.yourdomain.com;
 
     location / {
-        proxy_pass http://127.0.0.1:3847;
+        proxy_pass http://127.0.0.1:18789;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -94,7 +101,7 @@ Set the corresponding config:
 ```json
 {
   "gateway": {
-    "port": 3847,
+    "port": 18789,
     "webhookBaseUrl": "https://ch4p.yourdomain.com"
   }
 }
@@ -104,29 +111,57 @@ Set the corresponding config:
 
 ## Configure Gateway Settings
 
-Full gateway configuration in `config.json`:
+Gateway configuration in `~/.ch4p/config.json`:
 
 ```json
 {
   "gateway": {
-    "port": 3847,
-    "host": "127.0.0.1",
-    "webhookBaseUrl": null,
-    "maxConcurrentMessages": 10,
-    "messageTimeout": 30000,
-    "healthCheck": {
-      "enabled": true,
-      "path": "/health",
-      "interval": 60000
-    },
-    "logging": {
-      "level": "info",
-      "file": "~/.ch4p/logs/gateway.log",
-      "maxSize": "10mb",
-      "maxFiles": 5
+    "port": 18789,
+    "requirePairing": false,
+    "allowPublicBind": false
+  }
+}
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `port` | `18789` | HTTP server port |
+| `requirePairing` | `false` | Require pairing code for new connections |
+| `allowPublicBind` | `false` | Bind to `0.0.0.0` instead of `127.0.0.1` |
+
+---
+
+## Secrets Management
+
+Store channel tokens in `~/.ch4p/.env` (not in the repo):
+
+```bash
+TELEGRAM_BOT_TOKEN=your-telegram-token
+DISCORD_BOT_TOKEN=your-discord-token
+```
+
+Lock down permissions:
+
+```bash
+chmod 600 ~/.ch4p/.env
+```
+
+Reference tokens in `config.json` using `${VAR_NAME}` syntax:
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "token": "${TELEGRAM_BOT_TOKEN}"
     }
   }
 }
+```
+
+Source the env file before starting the gateway:
+
+```bash
+export $(cat ~/.ch4p/.env | xargs) && ch4p gateway
 ```
 
 ---
@@ -145,10 +180,10 @@ After=network.target
 [Service]
 Type=simple
 User=youruser
-ExecStart=/usr/local/bin/ch4p gateway --production
+EnvironmentFile=/home/youruser/.ch4p/.env
+ExecStart=/usr/local/bin/ch4p gateway
 Restart=always
 RestartSec=5
-Environment=NODE_ENV=production
 
 [Install]
 WantedBy=multi-user.target
@@ -177,7 +212,6 @@ Create `~/Library/LaunchAgents/com.ch4p.gateway.plist`:
     <array>
         <string>/usr/local/bin/ch4p</string>
         <string>gateway</string>
-        <string>--production</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -197,28 +231,25 @@ launchctl load ~/Library/LaunchAgents/com.ch4p.gateway.plist
 
 ## Verify the Deployment
 
-Check gateway status:
+Check the health endpoint:
 
 ```bash
-ch4p status
+curl http://localhost:18789/health
 ```
 
-Expected output:
+List active sessions:
 
-```
-Gateway: running (pid 12345)
-Uptime: 2h 15m
-Channels:
-  telegram  connected  latency=45ms
-  slack     connected  latency=120ms
-Health: https://abc123.ch4p.dev/health (200 OK)
+```bash
+curl http://localhost:18789/sessions
 ```
 
 ---
 
 ## Common Pitfalls
 
-- **Firewall**: Ensure port 3847 (or your configured port) is accessible if not using a tunnel.
+- **Port in use**: Kill stale processes with `lsof -ti:18789 | xargs kill -9` before restarting.
+- **Firewall**: Ensure port 18789 (or your configured port) is accessible if not using a tunnel.
 - **Webhook registration**: After changing the tunnel URL, re-register webhooks with each platform.
 - **Memory**: The gateway holds message queues in memory. Monitor RSS on long-running instances.
 - **TLS**: Always use HTTPS for webhook URLs. Most platforms reject plain HTTP.
+- **Secrets**: Never commit tokens to the repository. Use `~/.ch4p/.env` with `${VAR_NAME}` references.

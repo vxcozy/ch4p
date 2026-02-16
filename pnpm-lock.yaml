@@ -29,6 +29,9 @@ importers:
       '@ch4p/agent':
         specifier: workspace:*
         version: link:../../packages/agent
+      '@ch4p/channels':
+        specifier: workspace:*
+        version: link:../../packages/channels
       '@ch4p/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -59,6 +62,9 @@ importers:
       '@ch4p/tools':
         specifier: workspace:*
         version: link:../../packages/tools
+      '@ch4p/tunnels':
+        specifier: workspace:*
+        version: link:../../packages/tunnels
 
   apps/web:
     dependencies:
