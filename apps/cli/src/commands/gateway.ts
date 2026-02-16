@@ -24,6 +24,10 @@ import {
   DiscordChannel,
   SlackChannel,
   CliChannel,
+  MatrixChannel,
+  WhatsAppChannel,
+  SignalChannel,
+  IMessageChannel,
 } from '@ch4p/channels';
 import { createTunnelProvider } from '@ch4p/tunnels';
 import { Session, AgentLoop } from '@ch4p/agent';
@@ -36,6 +40,8 @@ import type { ObservabilityConfig } from '@ch4p/observability';
 import { createMemoryBackend } from '@ch4p/memory';
 import type { MemoryConfig } from '@ch4p/memory';
 import { DefaultSecurityPolicy } from '@ch4p/security';
+import { VoiceProcessor, WhisperSTT, DeepgramSTT, ElevenLabsTTS } from '@ch4p/voice';
+import type { VoiceConfig } from '@ch4p/voice';
 
 // ---------------------------------------------------------------------------
 // ANSI color helpers
@@ -66,6 +72,14 @@ function createChannelInstance(channelName: string): IChannel | null {
       return new SlackChannel();
     case 'cli':
       return new CliChannel();
+    case 'matrix':
+      return new MatrixChannel();
+    case 'whatsapp':
+      return new WhatsAppChannel();
+    case 'signal':
+      return new SignalChannel();
+    case 'imessage':
+      return new IMessageChannel();
     default:
       return null;
   }
@@ -213,6 +227,27 @@ export async function gateway(args: string[]): Promise<void> {
   };
   const observer = createObserver(obsCfg);
 
+  // Create voice processor (optional).
+  let voiceProcessor: VoiceProcessor | undefined;
+  const voiceCfg = config.voice;
+  if (voiceCfg?.enabled) {
+    try {
+      const sttProvider = voiceCfg.stt.provider === 'deepgram'
+        ? new DeepgramSTT({ apiKey: voiceCfg.stt.apiKey ?? '' })
+        : new WhisperSTT({ apiKey: voiceCfg.stt.apiKey ?? '' });
+      const ttsProvider = voiceCfg.tts.provider === 'elevenlabs'
+        ? new ElevenLabsTTS({ apiKey: voiceCfg.tts.apiKey ?? '', voiceId: voiceCfg.tts.voiceId })
+        : undefined;
+      voiceProcessor = new VoiceProcessor({
+        stt: sttProvider,
+        tts: ttsProvider,
+        config: voiceCfg as VoiceConfig,
+      });
+    } catch {
+      // Voice not critical for gateway.
+    }
+  }
+
   // Print startup banner.
   console.log(`\n  ${CYAN}${BOLD}ch4p Gateway${RESET}`);
   console.log(`  ${DIM}${'='.repeat(50)}${RESET}\n`);
@@ -233,6 +268,7 @@ export async function gateway(args: string[]): Promise<void> {
   console.log(`  ${BOLD}Pairing${RESET}       ${requirePairing ? `${GREEN}required${RESET}` : `${YELLOW}disabled${RESET}`}`);
   console.log(`  ${BOLD}Engine${RESET}        ${engine ? engine.name : `${YELLOW}none (no API key)${RESET}`}`);
   console.log(`  ${BOLD}Memory${RESET}        ${memoryBackend ? config.memory.backend : `${DIM}disabled${RESET}`}`);
+  console.log(`  ${BOLD}Voice${RESET}         ${voiceProcessor ? `${GREEN}enabled${RESET} (STT: ${voiceCfg?.stt.provider ?? '?'}, TTS: ${voiceCfg?.tts.provider ?? 'none'})` : `${DIM}disabled${RESET}`}`);
   console.log('');
   console.log(`  ${DIM}Routes:${RESET}`);
   console.log(`  ${DIM}  GET    /health              - liveness probe${RESET}`);
@@ -264,10 +300,10 @@ export async function gateway(args: string[]): Promise<void> {
         channelRegistry.register(channel);
         startedChannels.push(channel);
 
-        // Wire inbound messages: channel → messageRouter → AgentLoop → channel.send()
+        // Wire inbound messages: channel → voice → messageRouter → AgentLoop → channel.send()
         channel.onMessage((msg: InboundMessage) => {
           handleInboundMessage(
-            msg, channel, messageRouter, engine, config, observer, memoryBackend, skillRegistry,
+            msg, channel, messageRouter, engine, config, observer, memoryBackend, skillRegistry, voiceProcessor,
           );
         });
 
@@ -359,9 +395,11 @@ export async function gateway(args: string[]): Promise<void> {
 
 /**
  * Handle an inbound message from a channel:
- *   1. Route via MessageRouter to find/create a session
- *   2. Run through AgentLoop to generate a response
- *   3. Send the response back via the originating channel
+ *   1. Process voice attachments via VoiceProcessor (STT)
+ *   2. Route via MessageRouter to find/create a session
+ *   3. Run through AgentLoop to generate a response
+ *   4. Optionally synthesize response audio via VoiceProcessor (TTS)
+ *   5. Send the response back via the originating channel
  */
 function handleInboundMessage(
   msg: InboundMessage,
@@ -372,6 +410,7 @@ function handleInboundMessage(
   observer: ReturnType<typeof createObserver>,
   memoryBackend?: ReturnType<typeof createMemoryBackend>,
   skillRegistry?: SkillRegistry,
+  voiceProcessor?: VoiceProcessor,
 ): void {
   if (!engine) {
     // No engine available — send a polite error back.
@@ -382,7 +421,10 @@ function handleInboundMessage(
     return;
   }
 
-  if (!msg.text) return;
+  // Allow voice-only messages through — they may contain audio attachments
+  // that the VoiceProcessor will transcribe.
+  const hasAudio = msg.attachments?.some((a) => a.type === 'audio') ?? false;
+  if (!msg.text && !hasAudio) return;
 
   // Route the message to a session.
   const routeResult = router.route(msg);
@@ -391,6 +433,14 @@ function handleInboundMessage(
   // Run the agent asynchronously — don't block the channel handler.
   void (async () => {
     try {
+      // Process voice attachments (STT) if voice is enabled.
+      const processedMsg = voiceProcessor
+        ? await voiceProcessor.processInbound(msg)
+        : msg;
+
+      // After voice processing, ensure we have text to work with.
+      if (!processedMsg.text) return;
+
       const session = new (await import('@ch4p/agent')).Session(routeResult.config);
       const tools = ToolRegistry.createDefault({
         // In gateway mode, exclude heavyweight tools for safety.
@@ -421,7 +471,7 @@ function handleInboundMessage(
 
       let responseText = '';
 
-      for await (const event of loop.run(msg.text)) {
+      for await (const event of loop.run(processedMsg.text)) {
         if (event.type === 'text') {
           responseText = event.partial;
         } else if (event.type === 'complete') {
@@ -432,11 +482,18 @@ function handleInboundMessage(
       }
 
       if (responseText) {
-        await channel.send(msg.from, {
+        const outbound = {
           text: responseText,
           replyTo: msg.id,
-          format: 'text',
-        });
+          format: 'text' as const,
+        };
+
+        // Synthesize response audio (TTS) if voice is enabled.
+        const finalOutbound = voiceProcessor
+          ? await voiceProcessor.processOutbound(outbound)
+          : outbound;
+
+        await channel.send(msg.from, finalOutbound);
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);

@@ -1,5 +1,5 @@
 {
-  "name": "@ch4p/channels",
+  "name": "@ch4p/voice",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
@@ -16,11 +16,6 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@ch4p/core": "workspace:*",
-    "matrix-bot-sdk": "^0.7.0",
-    "ws": "^8.18.0"
-  },
-  "devDependencies": {
-    "@types/ws": "^8.5.0"
+    "@ch4p/core": "workspace:*"
   }
 }

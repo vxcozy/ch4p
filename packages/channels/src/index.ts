@@ -9,6 +9,14 @@ export { DiscordChannel, DiscordIntents } from './discord.js';
 export type { DiscordConfig } from './discord.js';
 export { SlackChannel } from './slack.js';
 export type { SlackConfig } from './slack.js';
+export { MatrixChannel } from './matrix.js';
+export type { MatrixConfig } from './matrix.js';
+export { WhatsAppChannel } from './whatsapp.js';
+export type { WhatsAppConfig } from './whatsapp.js';
+export { SignalChannel } from './signal.js';
+export type { SignalConfig } from './signal.js';
+export { IMessageChannel } from './imessage.js';
+export type { IMessageConfig } from './imessage.js';
 
 // Re-export channel-related types from core for convenience
 export type {

@@ -11,6 +11,10 @@ import { CliChannel } from './cli.js';
 import { TelegramChannel } from './telegram.js';
 import { DiscordChannel, DiscordIntents } from './discord.js';
 import { SlackChannel } from './slack.js';
+import { MatrixChannel } from './matrix.js';
+import { WhatsAppChannel } from './whatsapp.js';
+import { SignalChannel } from './signal.js';
+import { IMessageChannel } from './imessage.js';
 import { ChannelRegistry } from './index.js';
 import type {
   IChannel,
@@ -19,6 +23,95 @@ import type {
   Recipient,
   PresenceEvent,
 } from '@ch4p/core';
+
+// ---------------------------------------------------------------------------
+// Module mocks (hoisted by vitest)
+// ---------------------------------------------------------------------------
+
+/**
+ * vi.hoisted values are available inside vi.mock factory functions and in tests.
+ * This is the vitest-approved pattern for sharing state between mock factories
+ * and test code in ESM.
+ */
+const {
+  matrixMockClient,
+  matrixAutoJoinSetup,
+  mockExecFileCb,
+} = vi.hoisted(() => {
+  const matrixMockClient = {
+    getUserId: vi.fn(async () => '@bot:matrix.org'),
+    start: vi.fn(async () => {}),
+    stop: vi.fn(),
+    sendMessage: vi.fn(async () => '$event_1'),
+    on: vi.fn(),
+  };
+  const matrixAutoJoinSetup = vi.fn();
+  const mockExecFileCb = vi.fn(
+    (_cmd: string, _args: string[], cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+      cb(null, '[]', '');
+    },
+  );
+  return { matrixMockClient, matrixAutoJoinSetup, mockExecFileCb };
+});
+
+/** Mock matrix-bot-sdk so MatrixChannel can be tested without a real homeserver. */
+vi.mock('matrix-bot-sdk', () => ({
+  MatrixClient: vi.fn(() => matrixMockClient),
+  AutojoinRoomsMixin: { setupOnClient: matrixAutoJoinSetup },
+}));
+
+/** Mock node:net Socket for SignalChannel. */
+vi.mock('node:net', () => {
+  class MockSocket {
+    destroyed = false;
+    private _handlers: Record<string, Array<(...args: unknown[]) => void>> = {};
+
+    on(event: string, fn: (...args: unknown[]) => void) {
+      if (!this._handlers[event]) this._handlers[event] = [];
+      this._handlers[event]!.push(fn);
+      return this;
+    }
+
+    connect(_port: number, _host: string) {
+      // Fire 'connect' on the next microtask so the promise handler is registered.
+      queueMicrotask(() => this._emit('connect'));
+    }
+
+    write(data: string, _enc?: string, cb?: (err?: Error) => void) {
+      // Parse the JSON-RPC request and auto-respond so rpcCall resolves.
+      try {
+        const req = JSON.parse(data.trim());
+        if (req.id !== undefined) {
+          queueMicrotask(() => {
+            const response = JSON.stringify({ jsonrpc: '2.0', id: req.id, result: {} }) + '\n';
+            this._emit('data', Buffer.from(response));
+          });
+        }
+      } catch {
+        // Ignore parse errors on non-JSON writes.
+      }
+      if (cb) cb();
+      return true;
+    }
+
+    destroy() {
+      this.destroyed = true;
+      this._emit('close');
+    }
+
+    _emit(event: string, ...args: unknown[]) {
+      for (const fn of this._handlers[event] ?? []) {
+        fn(...args);
+      }
+    }
+  }
+  return { Socket: vi.fn(() => new MockSocket()) };
+});
+
+/** Mock node:child_process execFile for IMessageChannel. */
+vi.mock('node:child_process', () => ({
+  execFile: mockExecFileCb,
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -963,5 +1056,769 @@ describe('ChannelRegistry', () => {
     expect(reg.has('telegram')).toBe(true);
     expect(reg.has('discord')).toBe(true);
     expect(reg.has('slack')).toBe(true);
+  });
+});
+
+// ===========================================================================
+// MatrixChannel
+// ===========================================================================
+
+describe('MatrixChannel', () => {
+  beforeEach(() => {
+    // Reset all mock functions between tests.
+    matrixMockClient.getUserId.mockClear();
+    matrixMockClient.start.mockClear();
+    matrixMockClient.stop.mockClear();
+    matrixMockClient.sendMessage.mockClear();
+    matrixMockClient.on.mockClear();
+    matrixAutoJoinSetup.mockClear();
+
+    // Restore default implementations.
+    matrixMockClient.getUserId.mockImplementation(async () => '@bot:matrix.org');
+    matrixMockClient.start.mockImplementation(async () => {});
+    matrixMockClient.sendMessage.mockImplementation(async () => '$event_1');
+  });
+
+  it('has correct id and name', () => {
+    const ch = new MatrixChannel();
+    expect(ch.id).toBe('matrix');
+    expect(ch.name).toBe('Matrix');
+  });
+
+  it('is unhealthy before start', async () => {
+    const ch = new MatrixChannel();
+    expect(await ch.isHealthy()).toBe(false);
+  });
+
+  it('throws if homeserverUrl is missing', async () => {
+    const ch = new MatrixChannel();
+    await expect(ch.start({ accessToken: 'tok' })).rejects.toThrow('homeserverUrl');
+  });
+
+  it('throws if accessToken is missing', async () => {
+    const ch = new MatrixChannel();
+    await expect(ch.start({ homeserverUrl: 'https://matrix.org' })).rejects.toThrow('accessToken');
+  });
+
+  it('starts successfully with valid config', async () => {
+    const ch = new MatrixChannel();
+    await ch.start({ homeserverUrl: 'https://matrix.org', accessToken: 'test-tok' });
+
+    expect(matrixMockClient.start).toHaveBeenCalled();
+    expect(matrixMockClient.getUserId).toHaveBeenCalled();
+
+    await ch.stop();
+  });
+
+  it('is healthy after start', async () => {
+    const ch = new MatrixChannel();
+    await ch.start({ homeserverUrl: 'https://matrix.org', accessToken: 'test-tok' });
+    expect(await ch.isHealthy()).toBe(true);
+    await ch.stop();
+  });
+
+  it('becomes unhealthy after stop', async () => {
+    const ch = new MatrixChannel();
+    await ch.start({ homeserverUrl: 'https://matrix.org', accessToken: 'test-tok' });
+    await ch.stop();
+    expect(await ch.isHealthy()).toBe(false);
+  });
+
+  it('sends text messages', async () => {
+    const ch = new MatrixChannel();
+    await ch.start({ homeserverUrl: 'https://matrix.org', accessToken: 'test-tok' });
+
+    const result = await ch.send(
+      { channelId: 'matrix', groupId: '!room1:matrix.org' },
+      { text: 'Hello Matrix!' },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.messageId).toBeDefined();
+
+    expect(matrixMockClient.sendMessage).toHaveBeenCalledWith(
+      '!room1:matrix.org',
+      expect.objectContaining({ msgtype: 'm.text', body: 'Hello Matrix!' }),
+    );
+
+    await ch.stop();
+  });
+
+  it('returns error when no recipient provided', async () => {
+    const ch = new MatrixChannel();
+    await ch.start({ homeserverUrl: 'https://matrix.org', accessToken: 'test-tok' });
+
+    const result = await ch.send(
+      { channelId: 'matrix' },
+      { text: 'No target' },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('groupId');
+
+    await ch.stop();
+  });
+
+  it('returns error when client is not running', async () => {
+    const ch = new MatrixChannel();
+    // Don't start -- client is null.
+    const result = await ch.send(
+      { channelId: 'matrix', groupId: '!room:matrix.org' },
+      { text: 'test' },
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not running');
+  });
+
+  it('registers message handler without throwing', () => {
+    const ch = new MatrixChannel();
+    ch.onMessage(vi.fn());
+  });
+
+  it('registers presence handler without throwing', () => {
+    const ch = new MatrixChannel();
+    ch.onPresence(vi.fn());
+  });
+
+  it('sets up auto-join by default', async () => {
+    matrixAutoJoinSetup.mockClear();
+
+    const ch = new MatrixChannel();
+    await ch.start({ homeserverUrl: 'https://matrix.org', accessToken: 'test-tok' });
+
+    expect(matrixAutoJoinSetup).toHaveBeenCalled();
+    await ch.stop();
+  });
+
+  it('skips auto-join when autoJoin is false', async () => {
+    matrixAutoJoinSetup.mockClear();
+
+    const ch = new MatrixChannel();
+    await ch.start({
+      homeserverUrl: 'https://matrix.org',
+      accessToken: 'test-tok',
+      autoJoin: false,
+    });
+
+    expect(matrixAutoJoinSetup).not.toHaveBeenCalled();
+    await ch.stop();
+  });
+
+  it('handles second start as no-op', async () => {
+    const ch = new MatrixChannel();
+    await ch.start({ homeserverUrl: 'https://matrix.org', accessToken: 'test-tok' });
+    await ch.start({ homeserverUrl: 'https://matrix.org', accessToken: 'test-tok' });
+    expect(await ch.isHealthy()).toBe(true);
+    await ch.stop();
+  });
+});
+
+// ===========================================================================
+// WhatsAppChannel
+// ===========================================================================
+
+describe('WhatsAppChannel', () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('has correct id and name', () => {
+    const ch = new WhatsAppChannel();
+    expect(ch.id).toBe('whatsapp');
+    expect(ch.name).toBe('WhatsApp');
+  });
+
+  it('is unhealthy before start', async () => {
+    const ch = new WhatsAppChannel();
+    expect(await ch.isHealthy()).toBe(false);
+  });
+
+  it('throws if accessToken is missing', async () => {
+    const ch = new WhatsAppChannel();
+    await expect(ch.start({ phoneNumberId: 'pn1', verifyToken: 'vt' }))
+      .rejects.toThrow('accessToken');
+  });
+
+  it('throws if phoneNumberId is missing', async () => {
+    const ch = new WhatsAppChannel();
+    await expect(ch.start({ accessToken: 'tok', verifyToken: 'vt' }))
+      .rejects.toThrow('phoneNumberId');
+  });
+
+  it('throws if verifyToken is missing', async () => {
+    const ch = new WhatsAppChannel();
+    await expect(ch.start({ accessToken: 'tok', phoneNumberId: 'pn1' }))
+      .rejects.toThrow('verifyToken');
+  });
+
+  it('starts successfully with valid config', async () => {
+    const ch = new WhatsAppChannel();
+    await ch.start({ accessToken: 'tok', phoneNumberId: 'pn1', verifyToken: 'vt' });
+    // WhatsApp is webhook-only, so running = true immediately.
+    expect(await ch.isHealthy()).toBe(false); // isHealthy calls Graph API, not mocked here.
+    await ch.stop();
+  });
+
+  it('health check calls Graph API', async () => {
+    const mockFetch = createMockFetch([
+      { ok: true, data: { id: 'pn1' } },
+    ]);
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const ch = new WhatsAppChannel();
+    await ch.start({ accessToken: 'tok', phoneNumberId: 'pn1', verifyToken: 'vt' });
+
+    expect(await ch.isHealthy()).toBe(true);
+    expect(mockFetch).toHaveBeenCalled();
+
+    await ch.stop();
+  });
+
+  it('stops and becomes unhealthy', async () => {
+    const ch = new WhatsAppChannel();
+    await ch.start({ accessToken: 'tok', phoneNumberId: 'pn1', verifyToken: 'vt' });
+    await ch.stop();
+    expect(await ch.isHealthy()).toBe(false);
+  });
+
+  it('handles webhook verification with correct token', async () => {
+    const ch = new WhatsAppChannel();
+    await ch.start({ accessToken: 'tok', phoneNumberId: 'pn1', verifyToken: 'my-verify' });
+
+    const result = ch.handleWebhookVerification({
+      'hub.mode': 'subscribe',
+      'hub.verify_token': 'my-verify',
+      'hub.challenge': 'challenge-abc',
+    });
+
+    expect(result).toBe('challenge-abc');
+    await ch.stop();
+  });
+
+  it('rejects webhook verification with wrong token', async () => {
+    const ch = new WhatsAppChannel();
+    await ch.start({ accessToken: 'tok', phoneNumberId: 'pn1', verifyToken: 'my-verify' });
+
+    const result = ch.handleWebhookVerification({
+      'hub.mode': 'subscribe',
+      'hub.verify_token': 'wrong-token',
+      'hub.challenge': 'challenge-abc',
+    });
+
+    expect(result).toBeNull();
+    await ch.stop();
+  });
+
+  it('rejects webhook verification with wrong mode', async () => {
+    const ch = new WhatsAppChannel();
+    await ch.start({ accessToken: 'tok', phoneNumberId: 'pn1', verifyToken: 'my-verify' });
+
+    const result = ch.handleWebhookVerification({
+      'hub.mode': 'unsubscribe',
+      'hub.verify_token': 'my-verify',
+      'hub.challenge': 'challenge-abc',
+    });
+
+    expect(result).toBeNull();
+    await ch.stop();
+  });
+
+  it('processes webhook payload with text message', async () => {
+    const ch = new WhatsAppChannel();
+    const received: InboundMessage[] = [];
+    ch.onMessage((msg) => received.push(msg));
+
+    await ch.start({ accessToken: 'tok', phoneNumberId: 'pn1', verifyToken: 'vt' });
+
+    ch.handleWebhookPayload({
+      object: 'whatsapp_business_account',
+      entry: [{
+        id: 'entry1',
+        changes: [{
+          value: {
+            messaging_product: 'whatsapp',
+            contacts: [{ wa_id: '15551234567', profile: { name: 'Alice' } }],
+            messages: [{
+              from: '15551234567',
+              id: 'wamid.123',
+              timestamp: '1700000000',
+              type: 'text',
+              text: { body: 'Hello from WhatsApp!' },
+            }],
+          },
+          field: 'messages',
+        }],
+      }],
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0]!.text).toBe('Hello from WhatsApp!');
+    expect(received[0]!.from.userId).toBe('15551234567');
+    expect(received[0]!.id).toBe('wamid.123');
+    expect(received[0]!.channelId).toBe('whatsapp');
+
+    await ch.stop();
+  });
+
+  it('ignores payloads that are not whatsapp_business_account', async () => {
+    const ch = new WhatsAppChannel();
+    const received: InboundMessage[] = [];
+    ch.onMessage((msg) => received.push(msg));
+
+    await ch.start({ accessToken: 'tok', phoneNumberId: 'pn1', verifyToken: 'vt' });
+
+    ch.handleWebhookPayload({
+      object: 'instagram',
+      entry: [{
+        id: 'entry1',
+        changes: [{
+          value: {
+            messages: [{
+              from: '15551234567',
+              id: 'msg1',
+              timestamp: '1700000000',
+              type: 'text',
+              text: { body: 'Should be ignored' },
+            }],
+          },
+        }],
+      }],
+    });
+
+    expect(received).toHaveLength(0);
+    await ch.stop();
+  });
+
+  it('filters messages by allowedNumbers', async () => {
+    const ch = new WhatsAppChannel();
+    const received: InboundMessage[] = [];
+    ch.onMessage((msg) => received.push(msg));
+
+    await ch.start({
+      accessToken: 'tok',
+      phoneNumberId: 'pn1',
+      verifyToken: 'vt',
+      allowedNumbers: ['15551111111'],
+    });
+
+    // Allowed number.
+    ch.handleWebhookPayload({
+      object: 'whatsapp_business_account',
+      entry: [{
+        id: 'e1',
+        changes: [{
+          value: {
+            messages: [{
+              from: '15551111111',
+              id: 'msg-ok',
+              timestamp: '1700000001',
+              type: 'text',
+              text: { body: 'Allowed' },
+            }],
+          },
+        }],
+      }],
+    });
+
+    // Blocked number.
+    ch.handleWebhookPayload({
+      object: 'whatsapp_business_account',
+      entry: [{
+        id: 'e2',
+        changes: [{
+          value: {
+            messages: [{
+              from: '15559999999',
+              id: 'msg-blocked',
+              timestamp: '1700000002',
+              type: 'text',
+              text: { body: 'Blocked' },
+            }],
+          },
+        }],
+      }],
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0]!.text).toBe('Allowed');
+
+    await ch.stop();
+  });
+
+  it('extracts image attachments from webhook payload', async () => {
+    const ch = new WhatsAppChannel();
+    const received: InboundMessage[] = [];
+    ch.onMessage((msg) => received.push(msg));
+
+    await ch.start({ accessToken: 'tok', phoneNumberId: 'pn1', verifyToken: 'vt' });
+
+    ch.handleWebhookPayload({
+      object: 'whatsapp_business_account',
+      entry: [{
+        id: 'e1',
+        changes: [{
+          value: {
+            messages: [{
+              from: '15551234567',
+              id: 'wamid.img',
+              timestamp: '1700000003',
+              type: 'image',
+              image: { id: 'media-id-123', mime_type: 'image/jpeg', caption: 'My photo' },
+            }],
+          },
+        }],
+      }],
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0]!.text).toBe('My photo');
+    expect(received[0]!.attachments).toHaveLength(1);
+    expect(received[0]!.attachments![0]!.type).toBe('image');
+    expect(received[0]!.attachments![0]!.url).toBe('media-id-123');
+    expect(received[0]!.attachments![0]!.mimeType).toBe('image/jpeg');
+
+    await ch.stop();
+  });
+
+  it('extracts document attachments', async () => {
+    const ch = new WhatsAppChannel();
+    const received: InboundMessage[] = [];
+    ch.onMessage((msg) => received.push(msg));
+
+    await ch.start({ accessToken: 'tok', phoneNumberId: 'pn1', verifyToken: 'vt' });
+
+    ch.handleWebhookPayload({
+      object: 'whatsapp_business_account',
+      entry: [{
+        id: 'e1',
+        changes: [{
+          value: {
+            messages: [{
+              from: '15551234567',
+              id: 'wamid.doc',
+              timestamp: '1700000004',
+              type: 'document',
+              document: {
+                id: 'media-doc-456',
+                mime_type: 'application/pdf',
+                filename: 'report.pdf',
+                caption: 'Here is the report',
+              },
+            }],
+          },
+        }],
+      }],
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0]!.attachments).toHaveLength(1);
+    expect(received[0]!.attachments![0]!.type).toBe('file');
+    expect(received[0]!.attachments![0]!.filename).toBe('report.pdf');
+
+    await ch.stop();
+  });
+
+  it('handles reply context (replyTo)', async () => {
+    const ch = new WhatsAppChannel();
+    const received: InboundMessage[] = [];
+    ch.onMessage((msg) => received.push(msg));
+
+    await ch.start({ accessToken: 'tok', phoneNumberId: 'pn1', verifyToken: 'vt' });
+
+    ch.handleWebhookPayload({
+      object: 'whatsapp_business_account',
+      entry: [{
+        id: 'e1',
+        changes: [{
+          value: {
+            messages: [{
+              from: '15551234567',
+              id: 'wamid.reply',
+              timestamp: '1700000005',
+              type: 'text',
+              text: { body: 'Reply msg' },
+              context: { message_id: 'wamid.original' },
+            }],
+          },
+        }],
+      }],
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0]!.replyTo).toBe('wamid.original');
+
+    await ch.stop();
+  });
+
+  it('sends text messages via Graph API', async () => {
+    const mockFetch = createMockFetch([
+      { ok: true, data: { messages: [{ id: 'wamid.sent.1' }] } },
+    ]);
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const ch = new WhatsAppChannel();
+    await ch.start({ accessToken: 'tok', phoneNumberId: 'pn1', verifyToken: 'vt' });
+
+    const result = await ch.send(
+      { channelId: 'whatsapp', userId: '15551234567' },
+      { text: 'Hello WhatsApp!' },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.messageId).toBe('wamid.sent.1');
+
+    // Verify fetch was called with the correct URL.
+    const fetchUrl = mockFetch.mock.calls[0]![0] as string;
+    expect(fetchUrl).toContain('graph.facebook.com');
+    expect(fetchUrl).toContain('pn1/messages');
+
+    await ch.stop();
+  });
+
+  it('returns error when no userId in recipient', async () => {
+    const ch = new WhatsAppChannel();
+    await ch.start({ accessToken: 'tok', phoneNumberId: 'pn1', verifyToken: 'vt' });
+
+    const result = await ch.send(
+      { channelId: 'whatsapp' },
+      { text: 'No target' },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('userId');
+
+    await ch.stop();
+  });
+
+  it('handles second start as no-op', async () => {
+    const ch = new WhatsAppChannel();
+    await ch.start({ accessToken: 'tok', phoneNumberId: 'pn1', verifyToken: 'vt' });
+    await ch.start({ accessToken: 'tok', phoneNumberId: 'pn1', verifyToken: 'vt' });
+    // No throw -- second start is a no-op.
+    await ch.stop();
+  });
+
+  it('registers message handler without throwing', () => {
+    const ch = new WhatsAppChannel();
+    ch.onMessage(vi.fn());
+  });
+
+  it('onPresence is a no-op', () => {
+    const ch = new WhatsAppChannel();
+    ch.onPresence(vi.fn());
+  });
+});
+
+// ===========================================================================
+// SignalChannel
+// ===========================================================================
+
+describe('SignalChannel', () => {
+  it('has correct id and name', () => {
+    const ch = new SignalChannel();
+    expect(ch.id).toBe('signal');
+    expect(ch.name).toBe('Signal');
+  });
+
+  it('is unhealthy before start', async () => {
+    const ch = new SignalChannel();
+    expect(await ch.isHealthy()).toBe(false);
+  });
+
+  it('throws if account is missing', async () => {
+    const ch = new SignalChannel();
+    await expect(ch.start({})).rejects.toThrow('account');
+  });
+
+  it('starts successfully with valid config', async () => {
+    const ch = new SignalChannel();
+    await ch.start({ account: '+15551234567' });
+    // The mock Socket emits 'connect' asynchronously.
+    // After start resolves, running should be true.
+    await ch.stop();
+  });
+
+  it('stops cleanly', async () => {
+    const ch = new SignalChannel();
+    await ch.start({ account: '+15551234567' });
+    await ch.stop();
+    expect(await ch.isHealthy()).toBe(false);
+  });
+
+  it('registers message handler without throwing', () => {
+    const ch = new SignalChannel();
+    ch.onMessage(vi.fn());
+  });
+
+  it('onPresence is a no-op', () => {
+    const ch = new SignalChannel();
+    ch.onPresence(vi.fn());
+  });
+
+  it('returns error when no recipient provided', async () => {
+    const ch = new SignalChannel();
+    await ch.start({ account: '+15551234567' });
+
+    const result = await ch.send(
+      { channelId: 'signal' },
+      { text: 'No target' },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('userId');
+
+    await ch.stop();
+  });
+
+  it('handles second start as no-op', async () => {
+    const ch = new SignalChannel();
+    await ch.start({ account: '+15551234567' });
+    await ch.start({ account: '+15551234567' });
+    await ch.stop();
+  });
+});
+
+// ===========================================================================
+// IMessageChannel
+// ===========================================================================
+
+describe('IMessageChannel', () => {
+  const originalPlatform = process.platform;
+
+  beforeEach(() => {
+    // Ensure tests run as if on macOS.
+    Object.defineProperty(process, 'platform', { value: 'darwin', writable: true });
+
+    // Reset the execFile mock to return valid defaults.
+    mockExecFileCb.mockImplementation(
+      (cmd: string, args: string[], cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+        if (cmd === 'which') {
+          // "which sqlite3" succeeds.
+          cb(null, '/usr/bin/sqlite3', '');
+          return;
+        }
+        if (cmd === 'sqlite3') {
+          // Default: return empty result for any sqlite3 query.
+          if (args.some((a: string) => a.includes('MAX(ROWID)'))) {
+            cb(null, JSON.stringify([{ max_id: 100 }]), '');
+          } else if (args.some((a: string) => a.includes('SELECT 1'))) {
+            cb(null, '1', '');
+          } else {
+            cb(null, '[]', '');
+          }
+          return;
+        }
+        cb(null, '', '');
+      },
+    );
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, writable: true });
+  });
+
+  it('has correct id and name', () => {
+    const ch = new IMessageChannel();
+    expect(ch.id).toBe('imessage');
+    expect(ch.name).toBe('iMessage');
+  });
+
+  it('is unhealthy before start', async () => {
+    const ch = new IMessageChannel();
+    expect(await ch.isHealthy()).toBe(false);
+  });
+
+  it('throws on non-macOS platform', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', writable: true });
+    const ch = new IMessageChannel();
+    await expect(ch.start({})).rejects.toThrow('macOS-only');
+  });
+
+  it('throws when sqlite3 is not found', async () => {
+    mockExecFileCb.mockImplementation(
+      (cmd: string, _args: string[], cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+        if (cmd === 'which') {
+          cb(new Error('not found'), '', 'sqlite3 not found');
+          return;
+        }
+        cb(null, '', '');
+      },
+    );
+
+    const ch = new IMessageChannel();
+    await expect(ch.start({})).rejects.toThrow('sqlite3 CLI not found');
+  });
+
+  it('starts successfully with valid config', async () => {
+    const ch = new IMessageChannel();
+    await ch.start({ dbPath: '/tmp/test-chat.db' });
+    expect(await ch.isHealthy()).toBe(true);
+    await ch.stop();
+  });
+
+  it('stops and becomes unhealthy', async () => {
+    const ch = new IMessageChannel();
+    await ch.start({ dbPath: '/tmp/test-chat.db' });
+    await ch.stop();
+    expect(await ch.isHealthy()).toBe(false);
+  });
+
+  it('registers message handler without throwing', () => {
+    const ch = new IMessageChannel();
+    ch.onMessage(vi.fn());
+  });
+
+  it('onPresence is a no-op', () => {
+    const ch = new IMessageChannel();
+    ch.onPresence(vi.fn());
+  });
+
+  it('returns error when no recipient provided', async () => {
+    const ch = new IMessageChannel();
+    await ch.start({ dbPath: '/tmp/test-chat.db' });
+
+    const result = await ch.send(
+      { channelId: 'imessage' },
+      { text: 'No target' },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('userId');
+
+    await ch.stop();
+  });
+
+  it('handles second start as no-op', async () => {
+    const ch = new IMessageChannel();
+    await ch.start({ dbPath: '/tmp/test-chat.db' });
+    await ch.start({ dbPath: '/tmp/test-chat.db' });
+    expect(await ch.isHealthy()).toBe(true);
+    await ch.stop();
+  });
+
+  it('throws when database cannot be opened', async () => {
+    mockExecFileCb.mockImplementation(
+      (cmd: string, args: string[], cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+        if (cmd === 'which') {
+          cb(null, '/usr/bin/sqlite3', '');
+          return;
+        }
+        if (cmd === 'sqlite3' && args.some((a: string) => a.includes('MAX(ROWID)'))) {
+          cb(new Error('unable to open database file'), '', '');
+          return;
+        }
+        cb(null, '', '');
+      },
+    );
+
+    const ch = new IMessageChannel();
+    await expect(ch.start({ dbPath: '/nonexistent/chat.db' }))
+      .rejects.toThrow('Cannot read iMessage database');
   });
 });

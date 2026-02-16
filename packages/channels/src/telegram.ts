@@ -60,7 +60,17 @@ interface TelegramMessage {
   date: number;
   photo?: Array<{ file_id: string; file_size?: number }>;
   document?: { file_id: string; file_name?: string; mime_type?: string };
+  voice?: { file_id: string; duration: number; mime_type?: string };
+  audio?: { file_id: string; duration: number; mime_type?: string; title?: string };
+  video?: { file_id: string; duration: number; mime_type?: string };
   reply_to_message?: { message_id: number };
+}
+
+/** Telegram File response from getFile API. */
+interface TelegramFile {
+  file_id: string;
+  file_size?: number;
+  file_path?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +272,7 @@ export class TelegramChannel implements IChannel {
     }
 
     const text = msg.text ?? '';
-    if (!text && !msg.photo && !msg.document) return;
+    if (!text && !msg.photo && !msg.document && !msg.voice && !msg.audio && !msg.video) return;
 
     const attachments: Attachment[] = [];
     if (msg.photo && msg.photo.length > 0) {
@@ -280,6 +290,28 @@ export class TelegramChannel implements IChannel {
         url: msg.document.file_id,
         filename: msg.document.file_name,
         mimeType: msg.document.mime_type,
+      });
+    }
+    if (msg.voice) {
+      attachments.push({
+        type: 'audio',
+        url: msg.voice.file_id,
+        mimeType: msg.voice.mime_type ?? 'audio/ogg',
+      });
+    }
+    if (msg.audio) {
+      attachments.push({
+        type: 'audio',
+        url: msg.audio.file_id,
+        mimeType: msg.audio.mime_type ?? 'audio/mpeg',
+        filename: msg.audio.title,
+      });
+    }
+    if (msg.video) {
+      attachments.push({
+        type: 'video',
+        url: msg.video.file_id,
+        mimeType: msg.video.mime_type ?? 'video/mp4',
       });
     }
 
@@ -322,6 +354,40 @@ export class TelegramChannel implements IChannel {
     }
 
     return data.result ?? null;
+  }
+
+  /**
+   * Resolve a Telegram file_id to a downloadable URL.
+   * Uses the getFile API to get the file_path, then constructs the full URL.
+   */
+  async getFileUrl(fileId: string): Promise<string | null> {
+    try {
+      const file = await this.apiCall<TelegramFile>('getFile', { file_id: fileId });
+      if (file?.file_path) {
+        return `https://api.telegram.org/file/bot${this.token}/${file.file_path}`;
+      }
+    } catch {
+      // Failed to resolve file URL.
+    }
+    return null;
+  }
+
+  /**
+   * Download a Telegram file by its file_id and return the raw Buffer.
+   */
+  async downloadFile(fileId: string): Promise<{ data: Buffer; mimeType: string } | null> {
+    const url = await this.getFileUrl(fileId);
+    if (!url) return null;
+
+    try {
+      const response = await fetch(url, { signal: this.abortController?.signal });
+      if (!response.ok) return null;
+      const arrayBuf = await response.arrayBuffer();
+      const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
+      return { data: Buffer.from(arrayBuf), mimeType: contentType };
+    } catch {
+      return null;
+    }
   }
 
   private async sendAttachment(chatId: string, att: Attachment): Promise<void> {

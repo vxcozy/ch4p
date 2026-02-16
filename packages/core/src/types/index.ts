@@ -113,4 +113,16 @@ export interface Ch4pConfig {
     autoLoad: boolean;
     contextBudget: number;
   };
+  voice?: {
+    enabled: boolean;
+    stt: {
+      provider: 'whisper' | 'deepgram';
+      apiKey?: string;
+    };
+    tts: {
+      provider: 'elevenlabs' | 'none';
+      apiKey?: string;
+      voiceId?: string;
+    };
+  };
 }

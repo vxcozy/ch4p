@@ -16,6 +16,10 @@ import {
   DiscordChannel,
   SlackChannel,
   CliChannel,
+  MatrixChannel,
+  WhatsAppChannel,
+  SignalChannel,
+  IMessageChannel,
 } from '@ch4p/channels';
 import type { IChannel, OutboundMessage, Recipient } from '@ch4p/core';
 
@@ -49,6 +53,14 @@ function createChannelInstance(channelName: string): IChannel | null {
       return new SlackChannel();
     case 'cli':
       return new CliChannel();
+    case 'matrix':
+      return new MatrixChannel();
+    case 'whatsapp':
+      return new WhatsAppChannel();
+    case 'signal':
+      return new SignalChannel();
+    case 'imessage':
+      return new IMessageChannel();
     default:
       return null;
   }
