@@ -151,6 +151,26 @@ function checkApiKeys(): CheckResult {
 
   try {
     const config = loadConfig();
+
+    // Subprocess engines handle their own auth — no API key needed.
+    const engineDefault = config.engines?.default ?? 'native';
+    if (engineDefault === 'claude-cli' || engineDefault === 'codex-cli') {
+      return {
+        name: 'API keys',
+        status: 'ok',
+        message: `Using ${engineDefault} engine. Auth handled by CLI tool.`,
+      };
+    }
+
+    // Ollama runs locally — no API key needed.
+    if (config.agent?.provider === 'ollama') {
+      return {
+        name: 'API keys',
+        status: 'ok',
+        message: 'Using Ollama provider. No API key required (local inference).',
+      };
+    }
+
     const keys: string[] = [];
 
     const anthropicKey = (config.providers?.['anthropic'] as Record<string, unknown> | undefined)?.['apiKey'];

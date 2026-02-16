@@ -1336,14 +1336,14 @@ describe('AgentLoop', () => {
       const events = await collectEvents(loop, 'Engine error events');
 
       const errorEvents = events.filter((e) => e.type === 'error');
-      // Should have the error from the stream + the EngineError.
+      // Should have the error from the stream + the final error.
       expect(errorEvents).toHaveLength(2);
 
       // The first error is from the engine event stream.
       expect((errorEvents[0] as { error: Error }).error.message).toBe('Engine error');
 
-      // The second error is the EngineError about max retries.
-      expect((errorEvents[1] as { error: Error }).error.message).toContain('Engine returned error');
+      // The second error is the captured engine error (or EngineError fallback).
+      expect((errorEvents[1] as { error: Error }).error.message).toContain('Engine error');
     });
 
     it('should reset consecutive error count on successful engine start', async () => {

@@ -140,19 +140,39 @@ export function performAudit(config: Ch4pConfig): AuditResult[] {
 
   // 8. API key status
   id++;
-  const anthropicKey = (config.providers?.['anthropic'] as Record<string, unknown> | undefined)?.['apiKey'];
-  const openaiKey = (config.providers?.['openai'] as Record<string, unknown> | undefined)?.['apiKey'];
-  const hasAnthropicKey = typeof anthropicKey === 'string' && anthropicKey.length > 0 && !anthropicKey.includes('${');
-  const hasOpenaiKey = typeof openaiKey === 'string' && openaiKey.length > 0 && !openaiKey.includes('${');
-  const hasAnyKey = hasAnthropicKey || hasOpenaiKey;
-  results.push({
-    id,
-    name: 'API keys',
-    severity: hasAnyKey ? 'pass' : 'warn',
-    message: hasAnyKey
-      ? `API key(s) configured: ${[hasAnthropicKey && 'Anthropic', hasOpenaiKey && 'OpenAI'].filter(Boolean).join(', ')}`
-      : 'No API keys configured. Set keys via onboard or environment variables.',
-  });
+  const engineDefault = config.engines?.default ?? 'native';
+  const usesSubprocessEngine = engineDefault === 'claude-cli' || engineDefault === 'codex-cli';
+  const usesOllama = config.agent?.provider === 'ollama';
+
+  if (usesSubprocessEngine) {
+    results.push({
+      id,
+      name: 'API keys',
+      severity: 'pass',
+      message: `Using ${engineDefault} engine. Auth handled by CLI tool.`,
+    });
+  } else if (usesOllama) {
+    results.push({
+      id,
+      name: 'API keys',
+      severity: 'pass',
+      message: 'Using Ollama provider. No API key required (local inference).',
+    });
+  } else {
+    const anthropicKey = (config.providers?.['anthropic'] as Record<string, unknown> | undefined)?.['apiKey'];
+    const openaiKey = (config.providers?.['openai'] as Record<string, unknown> | undefined)?.['apiKey'];
+    const hasAnthropicKey = typeof anthropicKey === 'string' && anthropicKey.length > 0 && !anthropicKey.includes('${');
+    const hasOpenaiKey = typeof openaiKey === 'string' && openaiKey.length > 0 && !openaiKey.includes('${');
+    const hasAnyKey = hasAnthropicKey || hasOpenaiKey;
+    results.push({
+      id,
+      name: 'API keys',
+      severity: hasAnyKey ? 'pass' : 'warn',
+      message: hasAnyKey
+        ? `API key(s) configured: ${[hasAnthropicKey && 'Anthropic', hasOpenaiKey && 'OpenAI'].filter(Boolean).join(', ')}`
+        : 'No API keys configured. Set keys via onboard or environment variables.',
+    });
+  }
 
   // 9. Tunnel exposure
   id++;

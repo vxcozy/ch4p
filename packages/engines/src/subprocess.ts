@@ -27,6 +27,26 @@ import { EngineError, generateId } from '@ch4p/core';
 import { spawn, type ChildProcess } from 'node:child_process';
 
 // ---------------------------------------------------------------------------
+// Auth-failure detection
+// ---------------------------------------------------------------------------
+
+const AUTH_FAILURE_PATTERNS = [
+  'not logged in',
+  'please run /login',
+  'authentication required',
+  'unauthorized',
+  'auth token expired',
+  'invalid api key',
+  'invalid auth',
+];
+
+/** Check if stderr indicates an authentication/authorization failure. */
+export function isAuthFailure(stderr: string): boolean {
+  const lower = stderr.toLowerCase();
+  return AUTH_FAILURE_PATTERNS.some((p) => lower.includes(p));
+}
+
+// ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
 
@@ -220,6 +240,26 @@ export class SubprocessEngine implements IEngine {
       const exitCode = await exitPromise;
 
       if (exitCode !== 0 && exitCode !== null) {
+        // Detect auth failures and produce an actionable, non-retryable error.
+        if (stderr && isAuthFailure(stderr)) {
+          const hint = this.id === 'claude-cli'
+            ? "Run 'claude' in your terminal and use /login to sign in, then try again."
+            : this.id === 'codex-cli'
+              ? "Run 'codex' in your terminal to authenticate, then try again."
+              : `Authenticate with ${this.command}, then try again.`;
+
+          yield emit({
+            type: 'error',
+            error: new EngineError(
+              `${this.name} is not authenticated. ${hint}`,
+              this.id,
+              undefined,
+              false, // non-retryable
+            ),
+          });
+          return;
+        }
+
         yield emit({
           type: 'error',
           error: new EngineError(

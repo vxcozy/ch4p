@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { SubprocessEngine, createClaudeCliEngine, createCodexCliEngine } from './subprocess.js';
+import { SubprocessEngine, createClaudeCliEngine, createCodexCliEngine, isAuthFailure } from './subprocess.js';
 import { EngineError } from '@ch4p/core';
 import type { Job } from '@ch4p/core';
 
@@ -247,5 +247,74 @@ describe('createCodexCliEngine', () => {
     });
 
     expect(engine.id).toBe('codex-cli');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isAuthFailure
+// ---------------------------------------------------------------------------
+
+describe('isAuthFailure', () => {
+  it('detects "not logged in" pattern', () => {
+    expect(isAuthFailure('Not logged in · Please run /login')).toBe(true);
+  });
+
+  it('detects "please run /login" pattern', () => {
+    expect(isAuthFailure('Error: please run /login first')).toBe(true);
+  });
+
+  it('detects "authentication required" pattern', () => {
+    expect(isAuthFailure('Authentication required to continue')).toBe(true);
+  });
+
+  it('detects "unauthorized" pattern', () => {
+    expect(isAuthFailure('401 Unauthorized')).toBe(true);
+  });
+
+  it('detects "auth token expired" pattern', () => {
+    expect(isAuthFailure('Error: auth token expired, please re-authenticate')).toBe(true);
+  });
+
+  it('detects "invalid api key" pattern', () => {
+    expect(isAuthFailure('Error: Invalid API key provided')).toBe(true);
+  });
+
+  it('is case-insensitive', () => {
+    expect(isAuthFailure('NOT LOGGED IN')).toBe(true);
+    expect(isAuthFailure('UNAUTHORIZED')).toBe(true);
+  });
+
+  it('returns false for unrelated errors', () => {
+    expect(isAuthFailure('Timeout waiting for response')).toBe(false);
+    expect(isAuthFailure('Connection refused')).toBe(false);
+    expect(isAuthFailure('Out of memory')).toBe(false);
+    expect(isAuthFailure('')).toBe(false);
+  });
+
+  it('returns false for empty strings', () => {
+    expect(isAuthFailure('')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EngineError retryable
+// ---------------------------------------------------------------------------
+
+describe('EngineError retryable', () => {
+  it('defaults to retryable=true', () => {
+    const err = new EngineError('something failed', 'test-engine');
+    expect(err.retryable).toBe(true);
+  });
+
+  it('can be set to non-retryable', () => {
+    const err = new EngineError('auth failed', 'claude-cli', undefined, false);
+    expect(err.retryable).toBe(false);
+  });
+
+  it('preserves engine id and message', () => {
+    const err = new EngineError('not authenticated', 'claude-cli', undefined, false);
+    expect(err.engine).toBe('claude-cli');
+    expect(err.message).toBe('not authenticated');
+    expect(err.code).toBe('ENGINE_ERROR');
   });
 });

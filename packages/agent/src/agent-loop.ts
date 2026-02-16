@@ -276,7 +276,8 @@ export class AgentLoop {
           this.session.recordError(error);
           this.observer.onError(error, { phase: 'engine_start', iteration: iterations });
 
-          if (consecutiveErrors >= this.opts.maxRetries) {
+          const nonRetryable = error instanceof EngineError && !error.retryable;
+          if (nonRetryable || consecutiveErrors >= this.opts.maxRetries) {
             yield { type: 'error', error };
             done = true;
             break;
@@ -296,6 +297,7 @@ export class AgentLoop {
         let completionAnswer: string | undefined;
         let completionUsage: TokenUsage | undefined;
         let engineErrored = false;
+        let lastEngineError: Error | undefined;
 
         try {
           for await (const event of handle.events) {
@@ -331,6 +333,7 @@ export class AgentLoop {
 
             if (event.type === 'error') {
               engineErrored = true;
+              lastEngineError = event.error;
               break;
             }
           }
@@ -340,7 +343,8 @@ export class AgentLoop {
           this.session.recordError(error);
           this.observer.onError(error, { phase: 'engine_stream', iteration: iterations });
 
-          if (consecutiveErrors >= this.opts.maxRetries) {
+          const nonRetryable = error instanceof EngineError && !error.retryable;
+          if (nonRetryable || consecutiveErrors >= this.opts.maxRetries) {
             yield { type: 'error', error };
             done = true;
             break;
@@ -352,8 +356,11 @@ export class AgentLoop {
 
         if (engineErrored) {
           consecutiveErrors++;
-          if (consecutiveErrors >= this.opts.maxRetries) {
-            yield { type: 'error', error: new EngineError('Engine returned error', this.engine.id) };
+
+          // Check the engine error for non-retryable status (e.g., auth failures).
+          const nonRetryable = lastEngineError instanceof EngineError && !lastEngineError.retryable;
+          if (nonRetryable || consecutiveErrors >= this.opts.maxRetries) {
+            yield { type: 'error', error: lastEngineError ?? new EngineError('Engine returned error', this.engine.id) };
             done = true;
             break;
           }

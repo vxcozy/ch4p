@@ -3,9 +3,9 @@
  *
  * Walks the user through:
  *   1. Welcome banner with ASCII art
- *   2. Anthropic API key
- *   3. OpenAI API key
- *   4. Preferred model
+ *   2. Engine detection & selection (claude-cli, codex-cli, ollama, or API keys)
+ *   3. API key entry (only if API key path chosen)
+ *   4. Model selection (only if API key path chosen)
  *   5. Autonomy level
  *   6. Config file creation
  *   7. Security audit
@@ -15,6 +15,7 @@
  */
 
 import * as readline from 'node:readline';
+import { execSync } from 'node:child_process';
 import {
   getDefaultConfig,
   saveConfig,
@@ -55,7 +56,76 @@ ${CYAN}${BOLD}        _     _  _
 `;
 
 // ---------------------------------------------------------------------------
-// Prompt helper
+// Engine detection
+// ---------------------------------------------------------------------------
+
+export interface DetectedEngine {
+  id: string;
+  label: string;
+  description: string;
+}
+
+/** Check if a binary exists on PATH. */
+export function detectBinary(name: string): boolean {
+  try {
+    const cmd = process.platform === 'win32' ? `where ${name}` : `which ${name}`;
+    execSync(cmd, { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Scan PATH for known CLI engines and return available options. */
+export function detectEngines(): DetectedEngine[] {
+  const engines: DetectedEngine[] = [];
+
+  if (detectBinary('claude')) {
+    engines.push({
+      id: 'claude-cli',
+      label: 'Claude Code CLI',
+      description: 'Uses your Max/Pro plan — no API key needed',
+    });
+  }
+
+  if (detectBinary('codex')) {
+    engines.push({
+      id: 'codex-cli',
+      label: 'Codex CLI',
+      description: 'Uses your OpenAI account via codex — no API key needed',
+    });
+  }
+
+  if (detectBinary('ollama')) {
+    engines.push({
+      id: 'ollama',
+      label: 'Ollama (local)',
+      description: 'Run models locally — no API key, fully offline',
+    });
+  }
+
+  return engines;
+}
+
+/** Try to list installed Ollama models by querying the local server. */
+function listOllamaModels(): string[] {
+  try {
+    const raw = execSync('curl -sf http://localhost:11434/api/tags', {
+      timeout: 3000,
+      encoding: 'utf8',
+    });
+    const data = JSON.parse(raw);
+    if (Array.isArray(data?.models)) {
+      return (data.models as Array<{ name: string }>).map((m) => m.name);
+    }
+  } catch {
+    // Server not reachable or invalid response.
+  }
+  return [];
+}
+
+// ---------------------------------------------------------------------------
+// Prompt helpers
 // ---------------------------------------------------------------------------
 
 function createPromptInterface(): readline.Interface {
@@ -166,44 +236,135 @@ export async function onboard(): Promise<void> {
     console.log(`  ${BOLD}Welcome to ch4p!${RESET}`);
     console.log(`  ${DIM}Let's get you set up. Press Enter to skip any step.${RESET}\n`);
 
-    // --- Step 1: Anthropic API key ---
-    console.log(`  ${MAGENTA}Step 1/5${RESET} ${WHITE}Anthropic API Key${RESET}`);
-    console.log(`  ${DIM}Get yours at https://console.anthropic.com/keys${RESET}`);
-    const anthropicKey = await askSecret(rl, `  ${CYAN}> API key: ${RESET}`);
-    if (anthropicKey) {
-      (config.providers['anthropic'] as Record<string, unknown>)['apiKey'] = anthropicKey;
-      console.log(`  ${GREEN}Saved.${RESET}\n`);
-    } else {
-      console.log(`  ${DIM}Skipped. Set ANTHROPIC_API_KEY env var later.${RESET}\n`);
+    // -----------------------------------------------------------------------
+    // Detect available CLI engines
+    // -----------------------------------------------------------------------
+    const detectedEngines = detectEngines();
+    let useApiKeys = true; // Default: API key setup
+    let step = 0;
+
+    // Compute total steps based on whether we show engine selection.
+    // If CLI engines detected: step 1 = engine, then branch.
+    //   CLI path: engine + autonomy + save = 3 steps
+    //   API path: engine + anthropic + openai + model + autonomy + save = 6 steps
+    // If no CLI engines: original 5-step flow (no engine step).
+    let totalSteps = 5; // Default: no engine selection shown
+
+    if (detectedEngines.length > 0) {
+      // --- Engine selection step ---
+      step++;
+      // We can't know totalSteps until after the choice, so show "Step 1" without total.
+      console.log(`  ${MAGENTA}Step ${step}${RESET} ${WHITE}Engine Setup${RESET}`);
+      console.log('');
+
+      for (const eng of detectedEngines) {
+        console.log(`  ${GREEN}✓${RESET} ${eng.label} detected`);
+      }
+      console.log('');
+
+      for (let i = 0; i < detectedEngines.length; i++) {
+        const eng = detectedEngines[i]!;
+        const marker = i === 0 ? ` ${GREEN}(recommended)${RESET}` : '';
+        console.log(`  ${DIM}${i + 1}.${RESET} ${eng.label} — ${eng.description}${marker}`);
+      }
+      const apiIdx = detectedEngines.length + 1;
+      console.log(`  ${DIM}${apiIdx}.${RESET} API key setup (Anthropic/OpenAI keys)`);
+
+      const engineChoice = await ask(rl, `  ${CYAN}> Choice [1]: ${RESET}`);
+      const choiceNum = engineChoice ? parseInt(engineChoice, 10) : 1;
+      const chosenEngineIdx = choiceNum - 1;
+
+      if (chosenEngineIdx >= 0 && chosenEngineIdx < detectedEngines.length) {
+        // User picked a detected CLI engine.
+        const chosen = detectedEngines[chosenEngineIdx]!;
+        useApiKeys = false;
+        totalSteps = 3; // engine + autonomy + save
+
+        if (chosen.id === 'claude-cli' || chosen.id === 'codex-cli') {
+          // Subprocess engine — set as default, keep agent model/provider for metadata.
+          config.engines.default = chosen.id;
+          console.log(`  ${GREEN}Engine set to ${chosen.label}.${RESET}`);
+          console.log(`  ${DIM}Auth handled by your subscription. No API keys needed.${RESET}\n`);
+        } else if (chosen.id === 'ollama') {
+          // Ollama — native engine with ollama provider.
+          config.engines.default = 'native';
+          config.agent.provider = 'ollama';
+
+          // Try to list installed models and let user pick.
+          const models = listOllamaModels();
+          if (models.length > 0) {
+            console.log(`  ${GREEN}Ollama server is running.${RESET} Installed models:\n`);
+            for (let i = 0; i < models.length; i++) {
+              const marker = i === 0 ? ` ${GREEN}(default)${RESET}` : '';
+              console.log(`  ${DIM}${i + 1}.${RESET} ${models[i]}${marker}`);
+            }
+            const modelChoice = await ask(rl, `  ${CYAN}> Choice [1]: ${RESET}`);
+            const modelIdx = modelChoice ? parseInt(modelChoice, 10) - 1 : 0;
+            config.agent.model = models[modelIdx] ?? models[0] ?? 'llama3.3';
+          } else {
+            config.agent.model = 'llama3.3';
+            console.log(`  ${YELLOW}Ollama server not reachable. Using default model: llama3.3${RESET}`);
+            console.log(`  ${DIM}Start Ollama with 'ollama serve' before running ch4p.${RESET}`);
+          }
+          console.log(`  ${GREEN}Engine set to Ollama (${config.agent.model}).${RESET}\n`);
+        }
+      } else {
+        // User picked API key setup.
+        useApiKeys = true;
+        totalSteps = 6; // engine + anthropic + openai + model + autonomy + save
+        console.log(`  ${DIM}Proceeding with API key setup.${RESET}\n`);
+      }
     }
 
-    // --- Step 2: OpenAI API key ---
-    console.log(`  ${MAGENTA}Step 2/5${RESET} ${WHITE}OpenAI API Key (optional)${RESET}`);
-    console.log(`  ${DIM}Get yours at https://platform.openai.com/api-keys${RESET}`);
-    const openaiKey = await askSecret(rl, `  ${CYAN}> API key: ${RESET}`);
-    if (openaiKey) {
-      (config.providers['openai'] as Record<string, unknown>)['apiKey'] = openaiKey;
-      console.log(`  ${GREEN}Saved.${RESET}\n`);
-    } else {
-      console.log(`  ${DIM}Skipped.${RESET}\n`);
+    // -----------------------------------------------------------------------
+    // API key path (skipped for CLI engine users)
+    // -----------------------------------------------------------------------
+    if (useApiKeys) {
+      // --- Anthropic API key ---
+      step++;
+      console.log(`  ${MAGENTA}Step ${step}/${totalSteps}${RESET} ${WHITE}Anthropic API Key${RESET}`);
+      console.log(`  ${DIM}Get yours at https://console.anthropic.com/keys${RESET}`);
+      const anthropicKey = await askSecret(rl, `  ${CYAN}> API key: ${RESET}`);
+      if (anthropicKey) {
+        (config.providers['anthropic'] as Record<string, unknown>)['apiKey'] = anthropicKey;
+        console.log(`  ${GREEN}Saved.${RESET}\n`);
+      } else {
+        console.log(`  ${DIM}Skipped. Set ANTHROPIC_API_KEY env var later.${RESET}\n`);
+      }
+
+      // --- OpenAI API key ---
+      step++;
+      console.log(`  ${MAGENTA}Step ${step}/${totalSteps}${RESET} ${WHITE}OpenAI API Key (optional)${RESET}`);
+      console.log(`  ${DIM}Get yours at https://platform.openai.com/api-keys${RESET}`);
+      const openaiKey = await askSecret(rl, `  ${CYAN}> API key: ${RESET}`);
+      if (openaiKey) {
+        (config.providers['openai'] as Record<string, unknown>)['apiKey'] = openaiKey;
+        console.log(`  ${GREEN}Saved.${RESET}\n`);
+      } else {
+        console.log(`  ${DIM}Skipped.${RESET}\n`);
+      }
+
+      // --- Preferred model ---
+      step++;
+      console.log(`  ${MAGENTA}Step ${step}/${totalSteps}${RESET} ${WHITE}Preferred Model${RESET}`);
+      for (let i = 0; i < MODELS.length; i++) {
+        const m = MODELS[i]!;
+        const marker = i === 0 ? ` ${GREEN}(default)${RESET}` : '';
+        console.log(`  ${DIM}${i + 1}.${RESET} ${m.label}${marker}`);
+      }
+      const modelChoice = await ask(rl, `  ${CYAN}> Choice [1]: ${RESET}`);
+      const modelIdx = modelChoice ? parseInt(modelChoice, 10) - 1 : 0;
+      const selectedModel = MODELS[modelIdx] ?? MODELS[0]!;
+      config.agent.model = selectedModel.id;
+      config.agent.provider = selectedModel.provider;
+      console.log(`  ${GREEN}Selected: ${selectedModel.label}${RESET}\n`);
     }
 
-    // --- Step 3: Preferred model ---
-    console.log(`  ${MAGENTA}Step 3/5${RESET} ${WHITE}Preferred Model${RESET}`);
-    for (let i = 0; i < MODELS.length; i++) {
-      const m = MODELS[i]!;
-      const marker = i === 0 ? ` ${GREEN}(default)${RESET}` : '';
-      console.log(`  ${DIM}${i + 1}.${RESET} ${m.label}${marker}`);
-    }
-    const modelChoice = await ask(rl, `  ${CYAN}> Choice [1]: ${RESET}`);
-    const modelIdx = modelChoice ? parseInt(modelChoice, 10) - 1 : 0;
-    const selectedModel = MODELS[modelIdx] ?? MODELS[0]!;
-    config.agent.model = selectedModel.id;
-    config.agent.provider = selectedModel.provider;
-    console.log(`  ${GREEN}Selected: ${selectedModel.label}${RESET}\n`);
-
-    // --- Step 4: Autonomy level ---
-    console.log(`  ${MAGENTA}Step 4/5${RESET} ${WHITE}Autonomy Level${RESET}`);
+    // -----------------------------------------------------------------------
+    // Autonomy level (always shown)
+    // -----------------------------------------------------------------------
+    step++;
+    console.log(`  ${MAGENTA}Step ${step}/${totalSteps}${RESET} ${WHITE}Autonomy Level${RESET}`);
     for (let i = 0; i < AUTONOMY_LEVELS.length; i++) {
       const a = AUTONOMY_LEVELS[i]!;
       const marker = i === 1 ? ` ${GREEN}(default)${RESET}` : '';
@@ -215,8 +376,11 @@ export async function onboard(): Promise<void> {
     config.autonomy.level = selectedAutonomy.id;
     console.log(`  ${GREEN}Selected: ${selectedAutonomy.id}${RESET}\n`);
 
-    // --- Step 5: Save config ---
-    console.log(`  ${MAGENTA}Step 5/5${RESET} ${WHITE}Saving configuration${RESET}`);
+    // -----------------------------------------------------------------------
+    // Save config
+    // -----------------------------------------------------------------------
+    step++;
+    console.log(`  ${MAGENTA}Step ${step}/${totalSteps}${RESET} ${WHITE}Saving configuration${RESET}`);
     ensureConfigDir();
     saveConfig(config);
     console.log(`  ${GREEN}Config written to ${getConfigPath()}${RESET}\n`);

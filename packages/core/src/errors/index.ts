@@ -49,9 +49,17 @@ export class MemoryError extends Ch4pError {
 }
 
 export class EngineError extends Ch4pError {
-  constructor(message: string, public readonly engine: string, context?: Record<string, unknown>) {
+  public readonly retryable: boolean;
+
+  constructor(
+    message: string,
+    public readonly engine: string,
+    context?: Record<string, unknown>,
+    retryable = true,
+  ) {
     super(message, 'ENGINE_ERROR', { ...context, engine });
     this.name = 'EngineError';
+    this.retryable = retryable;
   }
 }
 
