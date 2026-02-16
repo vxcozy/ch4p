@@ -17,7 +17,6 @@
   },
   "dependencies": {
     "@ch4p/core": "workspace:*",
-    "matrix-bot-sdk": "^0.7.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

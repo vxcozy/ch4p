@@ -35,7 +35,6 @@ import type {
  */
 const {
   matrixMockClient,
-  matrixAutoJoinSetup,
   mockExecFileCb,
 } = vi.hoisted(() => {
   const matrixMockClient = {
@@ -43,9 +42,9 @@ const {
     start: vi.fn(async () => {}),
     stop: vi.fn(),
     sendMessage: vi.fn(async () => '$event_1'),
+    joinRoom: vi.fn(async () => {}),
     on: vi.fn(),
   };
-  const matrixAutoJoinSetup = vi.fn();
   const mockExecFileCb = vi.fn(
     (_cmd: string, _args: string[], cb: (err: Error | null, stdout: string, stderr: string) => void) => {
       cb(null, '[]', '');
@@ -66,13 +65,12 @@ const {
         },
       );
     });
-  return { matrixMockClient, matrixAutoJoinSetup, mockExecFileCb };
+  return { matrixMockClient, mockExecFileCb };
 });
 
-/** Mock matrix-bot-sdk so MatrixChannel can be tested without a real homeserver. */
-vi.mock('matrix-bot-sdk', () => ({
-  MatrixClient: vi.fn(() => matrixMockClient),
-  AutojoinRoomsMixin: { setupOnClient: matrixAutoJoinSetup },
+/** Mock MinimalMatrixClient so MatrixChannel can be tested without a real homeserver. */
+vi.mock('./matrix-client.js', () => ({
+  MinimalMatrixClient: vi.fn(() => matrixMockClient),
 }));
 
 /** Mock node:net Socket for SignalChannel. */
@@ -1365,13 +1363,14 @@ describe('MatrixChannel', () => {
     matrixMockClient.start.mockClear();
     matrixMockClient.stop.mockClear();
     matrixMockClient.sendMessage.mockClear();
+    matrixMockClient.joinRoom.mockClear();
     matrixMockClient.on.mockClear();
-    matrixAutoJoinSetup.mockClear();
 
     // Restore default implementations.
     matrixMockClient.getUserId.mockImplementation(async () => '@bot:matrix.org');
     matrixMockClient.start.mockImplementation(async () => {});
     matrixMockClient.sendMessage.mockImplementation(async () => '$event_1');
+    matrixMockClient.joinRoom.mockImplementation(async () => {});
   });
 
   it('has correct id and name', () => {
@@ -1476,18 +1475,18 @@ describe('MatrixChannel', () => {
   });
 
   it('sets up auto-join by default', async () => {
-    matrixAutoJoinSetup.mockClear();
-
     const ch = new MatrixChannel();
     await ch.start({ homeserverUrl: 'https://matrix.org', accessToken: 'test-tok' });
 
-    expect(matrixAutoJoinSetup).toHaveBeenCalled();
+    // Auto-join registers a 'room.invite' listener on the client.
+    const inviteCalls = matrixMockClient.on.mock.calls.filter(
+      (call: unknown[]) => call[0] === 'room.invite',
+    );
+    expect(inviteCalls.length).toBe(1);
     await ch.stop();
   });
 
   it('skips auto-join when autoJoin is false', async () => {
-    matrixAutoJoinSetup.mockClear();
-
     const ch = new MatrixChannel();
     await ch.start({
       homeserverUrl: 'https://matrix.org',
@@ -1495,7 +1494,11 @@ describe('MatrixChannel', () => {
       autoJoin: false,
     });
 
-    expect(matrixAutoJoinSetup).not.toHaveBeenCalled();
+    // No 'room.invite' listener should be registered.
+    const inviteCalls = matrixMockClient.on.mock.calls.filter(
+      (call: unknown[]) => call[0] === 'room.invite',
+    );
+    expect(inviteCalls.length).toBe(0);
     await ch.stop();
   });
 

@@ -1,8 +1,9 @@
 /**
  * MatrixChannel — Matrix protocol channel adapter.
  *
- * Implements the IChannel interface for Matrix using the matrix-bot-sdk
- * package for the sync loop and client API.
+ * Implements the IChannel interface for Matrix using MinimalMatrixClient,
+ * a lightweight fetch()-based wrapper around the Matrix client-server API.
+ * Zero third-party dependencies.
  *
  * Configuration (via ChannelConfig):
  *   homeserverUrl  — Matrix homeserver URL, e.g. "https://matrix.org" (required)
@@ -18,8 +19,6 @@
  *   - Room and user filtering whitelists
  *   - Auto-join room invitations
  *   - Typing indicator presence events
- *
- * Requires: matrix-bot-sdk (npm install matrix-bot-sdk)
  */
 
 import type {
@@ -33,7 +32,7 @@ import type {
   Attachment,
 } from '@ch4p/core';
 import { generateId } from '@ch4p/core';
-import { MatrixClient, AutojoinRoomsMixin } from 'matrix-bot-sdk';
+import { MinimalMatrixClient, type MatrixEvent } from './matrix-client.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,16 +66,6 @@ interface MatrixMessageContent {
   };
 }
 
-/** Minimal Matrix room event shape. */
-interface MatrixRoomEvent {
-  event_id: string;
-  type: string;
-  sender: string;
-  room_id: string;
-  origin_server_ts: number;
-  content: MatrixMessageContent;
-}
-
 // ---------------------------------------------------------------------------
 // MatrixChannel
 // ---------------------------------------------------------------------------
@@ -85,7 +74,7 @@ export class MatrixChannel implements IChannel {
   readonly id = 'matrix';
   readonly name = 'Matrix';
 
-  private client: MatrixClient | null = null;
+  private client: MinimalMatrixClient | null = null;
   private messageHandler: ((msg: InboundMessage) => void) | null = null;
   private presenceHandler: ((event: PresenceEvent) => void) | null = null;
   private running = false;
@@ -112,26 +101,28 @@ export class MatrixChannel implements IChannel {
     this.allowedUsers = new Set(cfg.allowedUsers ?? []);
 
     // Create the Matrix client.
-    this.client = new MatrixClient(cfg.homeserverUrl, cfg.accessToken);
+    this.client = new MinimalMatrixClient(cfg.homeserverUrl, cfg.accessToken);
 
     // Set up auto-join if enabled (default: true).
     const autoJoin = cfg.autoJoin ?? true;
     if (autoJoin) {
-      AutojoinRoomsMixin.setupOnClient(this.client);
+      this.client.on('room.invite', (roomId: string) => {
+        void this.client?.joinRoom(roomId).catch(() => {/* ignore join errors */});
+      });
     }
 
     // Resolve the bot's own user ID to ignore our own messages.
     this.botUserId = await this.client.getUserId();
 
     // Register room message handler.
-    this.client.on('room.message', (roomId: string, event: MatrixRoomEvent) => {
-      this.processEvent(roomId, event);
+    this.client.on('room.message', (roomId: string, event: MatrixEvent) => {
+      this.processEvent(roomId, event as unknown as { event_id: string; type: string; sender: string; room_id: string; origin_server_ts: number; content: MatrixMessageContent });
     });
 
     // Register typing event handler for presence.
-    this.client.on('room.event', (roomId: string, event: MatrixRoomEvent) => {
+    this.client.on('room.event', (roomId: string, event: MatrixEvent) => {
       if (event.type === 'm.typing') {
-        this.handleTypingEvent(roomId, event);
+        this.handleTypingEvent(roomId, event as unknown as { event_id: string; type: string; sender: string; room_id: string; origin_server_ts: number; content: MatrixMessageContent });
       }
     });
 
@@ -227,7 +218,7 @@ export class MatrixChannel implements IChannel {
   // Event processing
   // -----------------------------------------------------------------------
 
-  private processEvent(roomId: string, event: MatrixRoomEvent): void {
+  private processEvent(roomId: string, event: { event_id: string; type: string; sender: string; room_id: string; origin_server_ts: number; content: MatrixMessageContent }): void {
     if (!this.messageHandler) return;
 
     // Only process m.room.message events.
@@ -290,7 +281,7 @@ export class MatrixChannel implements IChannel {
     this.messageHandler(inbound);
   }
 
-  private handleTypingEvent(roomId: string, event: MatrixRoomEvent): void {
+  private handleTypingEvent(roomId: string, event: { event_id: string; type: string; sender: string; room_id: string; origin_server_ts: number; content: MatrixMessageContent }): void {
     if (!this.presenceHandler) return;
 
     // The m.typing event content has a user_ids array of currently typing users.
