@@ -27,6 +27,7 @@ logs/
 *.jsonl
 
 # Local-only / session docs
+CLAUDE.md
 handover.md
 todo.md
 lessons.md
