@@ -132,4 +132,34 @@ export interface Ch4pConfig {
     /** Per-session component limit (default 500). */
     maxComponents?: number;
   };
+  /** ERC-8004 on-chain identity configuration. */
+  identity?: {
+    enabled: boolean;
+    provider: 'erc8004';
+    /** Chain ID (EIP-155). Default: 8453 (Base). */
+    chainId?: number;
+    /** JSON-RPC endpoint for the target chain. */
+    rpcUrl?: string;
+    /** Contract addresses (defaults come from the plugin). */
+    contracts?: {
+      identityRegistry?: string;
+      reputationRegistry?: string;
+      validationRegistry?: string;
+    };
+    /** Agent ID if already registered on-chain. */
+    agentId?: string;
+    /** Private key for write operations. Supports ${CH4P_SECRET:name}. */
+    privateKey?: string;
+    /** When to submit reputation feedback. */
+    feedbackMode?: 'always' | 'threshold' | 'manual' | 'off';
+    /** Reputation threshold for automatic feedback (0-1). */
+    feedbackThreshold?: number;
+    /** Trust thresholds for gating external agent connections. */
+    trust?: {
+      minReputation?: number;
+      minValidation?: number;
+      trustedClients?: string[];
+      trustedValidators?: string[];
+    };
+  };
 }

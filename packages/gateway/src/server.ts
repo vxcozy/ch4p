@@ -7,6 +7,7 @@
  *
  * Routes:
  *   GET    /health                - liveness probe (no auth required)
+ *   GET    /.well-known/agent.json - ERC-8004 service discovery (no auth)
  *   POST   /pair                  - exchange pairing code for token
  *   GET    /sessions              - list active sessions
  *   POST   /sessions              - create a new session
@@ -45,6 +46,8 @@ export interface GatewayServerOptions {
   staticDir?: string;
   /** Called when a new WebSocket bridge is established. */
   onCanvasConnection?: (sessionId: string, bridge: WebSocketBridge) => void;
+  /** Agent registration file served at GET /.well-known/agent.json (ERC-8004 service discovery). */
+  agentRegistration?: Record<string, unknown>;
 }
 
 export class GatewayServer {
@@ -58,6 +61,7 @@ export class GatewayServer {
   private readonly canvasSessionManager: CanvasSessionManager | null;
   private readonly staticDir: string | null;
   private readonly onCanvasConnection: ((sessionId: string, bridge: WebSocketBridge) => void) | null;
+  private readonly agentRegistration: Record<string, unknown> | null;
 
   constructor(options: GatewayServerOptions) {
     this.port = options.port;
@@ -72,6 +76,7 @@ export class GatewayServer {
     this.canvasSessionManager = options.canvasSessionManager ?? null;
     this.staticDir = options.staticDir ?? null;
     this.onCanvasConnection = options.onCanvasConnection ?? null;
+    this.agentRegistration = options.agentRegistration ?? null;
   }
 
   /** Start listening on the configured port. */
@@ -222,6 +227,16 @@ export class GatewayServer {
         canvas: this.canvasSessionManager?.listSessionIds().length ?? 0,
         ...(stats ? { pairing: stats } : {}),
       });
+      return;
+    }
+
+    // GET /.well-known/agent.json — ERC-8004 service discovery (no auth)
+    if (method === 'GET' && url === '/.well-known/agent.json') {
+      if (!this.agentRegistration) {
+        this.sendJson(res, 404, { error: 'No agent registration configured.' });
+        return;
+      }
+      this.sendJson(res, 200, this.agentRegistration);
       return;
     }
 

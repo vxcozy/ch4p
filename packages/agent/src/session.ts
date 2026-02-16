@@ -37,6 +37,9 @@ export interface SessionMetadata {
 export interface SessionOpts {
   /** Options forwarded to the ContextManager. */
   contextOpts?: ContextManagerOpts;
+  /** Inject an existing ContextManager for conversation continuity (e.g. REPL).
+   *  When provided, the session shares this context instead of creating a new one. */
+  sharedContext?: ContextManager;
 }
 
 // ---------------------------------------------------------------------------
@@ -54,7 +57,7 @@ export class Session {
     this.config = config;
     this.state = 'created';
 
-    this.context = new ContextManager(opts.contextOpts);
+    this.context = opts.sharedContext ?? new ContextManager(opts.contextOpts);
     this.steering = new SteeringQueue();
 
     this.metadata = {

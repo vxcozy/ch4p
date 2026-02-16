@@ -106,6 +106,7 @@ function printHelp(): void {
     ${GREEN}message${RESET}      Send a message via a channel
     ${GREEN}skills${RESET}       Manage agent skills
     ${GREEN}canvas${RESET}       Start the interactive canvas workspace
+    ${GREEN}identity${RESET}     Manage on-chain agent identity (ERC-8004)
 
   ${BOLD}Agent Options${RESET}
     ${GREEN}-m, --message${RESET} "text"      Run a single message and exit
@@ -231,6 +232,12 @@ async function main(): Promise<void> {
     case 'canvas': {
       const { canvas } = await import('./commands/canvas.js');
       await canvas(rest);
+      break;
+    }
+
+    case 'identity': {
+      const { identity } = await import('./commands/identity.js');
+      await identity(rest);
       break;
     }
 

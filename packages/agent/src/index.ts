@@ -30,3 +30,6 @@ export type { FormatVerifierOpts, FormatRule } from './format-verifier.js';
 
 export { LLMVerifier } from './llm-verifier.js';
 export type { LLMVerifierOpts } from './llm-verifier.js';
+
+export { createAutoRecallHook, createAutoSummarizeHook } from './auto-memory.js';
+export type { AutoRecallOpts, AutoSummarizeOpts } from './auto-memory.js';

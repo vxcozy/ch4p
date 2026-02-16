@@ -19,8 +19,8 @@ import { generateId } from '@ch4p/core';
 import { NativeEngine, createClaudeCliEngine, createCodexCliEngine, SubprocessEngine } from '@ch4p/engines';
 import type { SubprocessEngineConfig } from '@ch4p/engines';
 import { ProviderRegistry } from '@ch4p/providers';
-import { Session, AgentLoop } from '@ch4p/agent';
-import type { AgentEvent } from '@ch4p/agent';
+import { Session, AgentLoop, ContextManager, createAutoRecallHook, createAutoSummarizeHook } from '@ch4p/agent';
+import type { AgentEvent, AgentLoopOpts, SessionOpts } from '@ch4p/agent';
 import { ToolRegistry, LoadSkillTool } from '@ch4p/tools';
 import { createObserver } from '@ch4p/observability';
 import type { ObservabilityConfig } from '@ch4p/observability';
@@ -290,11 +290,19 @@ function createStubEngine(config: Ch4pConfig): IEngine {
 // Session + AgentLoop creation
 // ---------------------------------------------------------------------------
 
-function createSessionConfig(config: Ch4pConfig, skillRegistry?: SkillRegistry): SessionConfig {
+function createSessionConfig(config: Ch4pConfig, skillRegistry?: SkillRegistry, hasMemory?: boolean): SessionConfig {
   let systemPrompt =
     'You are ch4p, a personal AI assistant. ' +
     'You are helpful, concise, and security-conscious. ' +
     'When asked to perform actions, respect the configured autonomy level.';
+
+  // When memory is available, let the LLM know it can remember things.
+  if (hasMemory) {
+    systemPrompt +=
+      ' You have persistent memory — you can recall information from previous conversations ' +
+      'and learn from interactions over time. Use the memory_store and memory_recall tools ' +
+      'to explicitly save or retrieve specific information when helpful.';
+  }
 
   // Inject skill descriptions for progressive disclosure.
   if (skillRegistry && skillRegistry.size > 0) {
@@ -411,24 +419,34 @@ function createSecurityPolicy(config: Ch4pConfig, cwd: string): ISecurityPolicy 
 /**
  * Create a full AgentLoop wired with engine, tools, observer, memory, and security.
  */
+interface CreateAgentLoopExtras {
+  sessionOpts?: SessionOpts;
+  onBeforeFirstRun?: AgentLoopOpts['onBeforeFirstRun'];
+  onAfterComplete?: AgentLoopOpts['onAfterComplete'];
+  maxIterations?: number;
+}
+
 function createAgentLoop(
   config: Ch4pConfig,
   engine: IEngine,
   sessionConfig: SessionConfig,
   memoryBackend?: IMemoryBackend,
   skillRegistry?: SkillRegistry,
+  extras?: CreateAgentLoopExtras,
 ): AgentLoop {
-  const session = new Session(sessionConfig);
+  const session = new Session(sessionConfig, extras?.sessionOpts);
   const tools = createToolRegistry(config, skillRegistry);
   const observer = createConfiguredObserver(config);
   const securityPolicy = createSecurityPolicy(config, sessionConfig.cwd ?? process.cwd());
 
   return new AgentLoop(session, engine, tools.list(), observer, {
-    maxIterations: 50,
+    maxIterations: extras?.maxIterations ?? 50,
     maxRetries: 3,
     enableStateSnapshots: true,
     memoryBackend,
     securityPolicy,
+    onBeforeFirstRun: extras?.onBeforeFirstRun,
+    onAfterComplete: extras?.onAfterComplete,
   });
 }
 
@@ -443,8 +461,9 @@ async function runAgentMessage(
   message: string,
   memoryBackend?: IMemoryBackend,
   skillRegistry?: SkillRegistry,
+  extras?: CreateAgentLoopExtras,
 ): Promise<void> {
-  const loop = createAgentLoop(config, engine, sessionConfig, memoryBackend, skillRegistry);
+  const loop = createAgentLoop(config, engine, sessionConfig, memoryBackend, skillRegistry, extras);
 
   for await (const event of loop.run(message)) {
     handleAgentEvent(event);
@@ -474,9 +493,28 @@ const REPL_HELP = `
 async function runRepl(config: Ch4pConfig): Promise<void> {
   const engine = createEngine(config);
   const skillRegistry = createSkillRegistry(config);
-  const sessionConfig = createSessionConfig(config, skillRegistry);
-  const tools = createToolRegistry(config);
   const memoryBackend = createMemory(config);
+  const hasMemory = !!memoryBackend;
+  const sessionConfig = createSessionConfig(config, skillRegistry, hasMemory);
+  const tools = createToolRegistry(config);
+
+  // Create a shared ContextManager that persists across REPL messages.
+  // This gives the agent conversation continuity within the session.
+  const sharedContext = new ContextManager();
+
+  // Set the system prompt on the shared context.
+  if (sessionConfig.systemPrompt) {
+    sharedContext.setSystemPrompt(sessionConfig.systemPrompt);
+  }
+
+  // Build auto-memory lifecycle hooks when memory is available and autoSave is on.
+  const autoSave = config.memory.autoSave !== false; // default: true
+  const onBeforeFirstRun = (memoryBackend && autoSave)
+    ? createAutoRecallHook(memoryBackend)
+    : undefined;
+  const onAfterComplete = (memoryBackend && autoSave)
+    ? createAutoSummarizeHook(memoryBackend)
+    : undefined;
 
   // Brief splash animation (TTY only).
   if (process.stdout.isTTY) {
@@ -486,7 +524,7 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
   console.log(`  ${DIM}Interactive mode. Type ${CYAN}/help${DIM} for commands, ${CYAN}/exit${DIM} to quit.${RESET}`);
   console.log(`  ${DIM}Engine: ${engine.name} | Model: ${config.agent.model} | Autonomy: ${config.autonomy.level}${RESET}`);
   console.log(`  ${DIM}Tools: ${tools.names().join(', ')}${RESET}`);
-  console.log(`  ${DIM}Memory: ${memoryBackend ? config.memory.backend : 'disabled'}${RESET}`);
+  console.log(`  ${DIM}Memory: ${memoryBackend ? `${config.memory.backend}${autoSave ? ' (auto)' : ''}` : 'disabled'}${RESET}`);
   if (skillRegistry.size > 0) {
     console.log(`  ${DIM}Skills: ${skillRegistry.names().join(', ')}${RESET}`);
   }
@@ -538,6 +576,11 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
           return;
 
         case '/clear':
+          sharedContext.clear();
+          // Re-set the system prompt after clearing.
+          if (sessionConfig.systemPrompt) {
+            sharedContext.setSystemPrompt(sessionConfig.systemPrompt);
+          }
           console.log(`  ${GREEN}Conversation cleared.${RESET}\n`);
           rl.prompt();
           continue;
@@ -599,7 +642,11 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
     // Run the message through the full AgentLoop pipeline.
     console.log('');
     try {
-      await runAgentMessage(config, engine, sessionConfig, input, memoryBackend, skillRegistry);
+      await runAgentMessage(config, engine, sessionConfig, input, memoryBackend, skillRegistry, {
+        sessionOpts: { sharedContext },
+        onBeforeFirstRun,
+        onAfterComplete,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`\n  ${RED}Error:${RESET} ${message}`);
@@ -616,11 +663,24 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
 async function runSingleMessage(config: Ch4pConfig, message: string): Promise<void> {
   const engine = createEngine(config);
   const skillRegistry = createSkillRegistry(config);
-  const sessionConfig = createSessionConfig(config, skillRegistry);
   const memoryBackend = createMemory(config);
+  const hasMemory = !!memoryBackend;
+  const sessionConfig = createSessionConfig(config, skillRegistry, hasMemory);
+
+  // Wire auto-memory hooks for single-message mode.
+  const autoSave = config.memory.autoSave !== false;
+  const onBeforeFirstRun = (memoryBackend && autoSave)
+    ? createAutoRecallHook(memoryBackend)
+    : undefined;
+  const onAfterComplete = (memoryBackend && autoSave)
+    ? createAutoSummarizeHook(memoryBackend)
+    : undefined;
 
   try {
-    await runAgentMessage(config, engine, sessionConfig, message, memoryBackend, skillRegistry);
+    await runAgentMessage(config, engine, sessionConfig, message, memoryBackend, skillRegistry, {
+      onBeforeFirstRun,
+      onAfterComplete,
+    });
     console.log('');
   } catch (err) {
     const errMessage = err instanceof Error ? err.message : String(err);

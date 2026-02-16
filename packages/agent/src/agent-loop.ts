@@ -54,6 +54,7 @@ import { setMaxListeners } from 'node:events';
 import { homedir } from 'node:os';
 
 import { Session } from './session.js';
+import type { ContextManager } from './context.js';
 import type { SteeringMessage } from './steering.js';
 import { ToolWorkerPool } from './worker-pool.js';
 
@@ -123,6 +124,12 @@ export interface AgentLoopOpts {
   /** Extra properties to spread onto the ToolContext. Used to inject
    *  domain-specific state (e.g. canvasState for the canvas tool). */
   toolContextExtensions?: Record<string, unknown>;
+  /** Called before the first engine call. Use to inject recalled memories
+   *  into the context (e.g. auto-recall from memory backend). */
+  onBeforeFirstRun?: (ctx: ContextManager) => Promise<void>;
+  /** Called after the run completes successfully. Receives the full context
+   *  and final answer for summarization (e.g. auto-store to memory backend). */
+  onAfterComplete?: (ctx: ContextManager, answer: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -176,12 +183,14 @@ export class AgentLoop {
   private readonly tools: Map<string, ITool>;
   private readonly toolDefs: ToolDefinition[];
   private readonly observer: IObserver;
-  private readonly opts: Required<Omit<AgentLoopOpts, 'verifier' | 'enableStateSnapshots' | 'memoryBackend' | 'securityPolicy' | 'toolContextExtensions'>> & {
+  private readonly opts: Required<Omit<AgentLoopOpts, 'verifier' | 'enableStateSnapshots' | 'memoryBackend' | 'securityPolicy' | 'toolContextExtensions' | 'onBeforeFirstRun' | 'onAfterComplete'>> & {
     verifier?: IVerifier;
     enableStateSnapshots: boolean;
     memoryBackend?: IMemoryBackend;
     securityPolicy?: ISecurityPolicy;
     toolContextExtensions?: Record<string, unknown>;
+    onBeforeFirstRun?: (ctx: ContextManager) => Promise<void>;
+    onAfterComplete?: (ctx: ContextManager, answer: string) => Promise<void>;
   };
 
   private abortController: AbortController | null = null;
@@ -216,6 +225,8 @@ export class AgentLoop {
       memoryBackend: opts.memoryBackend,
       securityPolicy: opts.securityPolicy,
       toolContextExtensions: opts.toolContextExtensions,
+      onBeforeFirstRun: opts.onBeforeFirstRun,
+      onAfterComplete: opts.onAfterComplete,
     };
 
     if (opts.workerPool) {
@@ -264,6 +275,15 @@ export class AgentLoop {
       role: 'user',
       content: initialMessage,
     });
+
+    // Lifecycle hook: inject recalled memories before the first engine call.
+    if (this.opts.onBeforeFirstRun) {
+      try {
+        await this.opts.onBeforeFirstRun(this.session.getContext());
+      } catch {
+        // Memory recall failures should never crash the agent loop.
+      }
+    }
 
     let iterations = 0;
     let consecutiveErrors = 0;
@@ -544,6 +564,15 @@ export class AgentLoop {
       }
 
       this.session.complete();
+
+      // Lifecycle hook: auto-summarize the completed conversation.
+      if (this.opts.onAfterComplete && finalAnswer) {
+        try {
+          await this.opts.onAfterComplete(this.session.getContext(), finalAnswer);
+        } catch {
+          // Memory store failures should never crash the agent loop.
+        }
+      }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       yield { type: 'error', error };

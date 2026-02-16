@@ -30,7 +30,7 @@ import {
   IMessageChannel,
 } from '@ch4p/channels';
 import { createTunnelProvider } from '@ch4p/tunnels';
-import { Session, AgentLoop } from '@ch4p/agent';
+import { Session, AgentLoop, createAutoRecallHook, createAutoSummarizeHook } from '@ch4p/agent';
 import { NativeEngine, createClaudeCliEngine, createCodexCliEngine } from '@ch4p/engines';
 import { ProviderRegistry } from '@ch4p/providers';
 import { ToolRegistry, LoadSkillTool } from '@ch4p/tools';
@@ -181,12 +181,28 @@ export async function gateway(args: string[]): Promise<void> {
       'You are helpful, concise, and security-conscious.',
   };
 
+  // Build agent registration file for ERC-8004 service discovery.
+  let agentRegistration: Record<string, unknown> | undefined;
+  if (config.identity?.enabled) {
+    agentRegistration = {
+      type: 'AgentRegistrationFile',
+      name: 'ch4p',
+      description: 'ch4p personal AI assistant',
+      image: '',
+      services: [],
+      active: true,
+      ...(config.identity.agentId ? { agentId: config.identity.agentId } : {}),
+      ...(config.identity.chainId ? { chainId: config.identity.chainId } : {}),
+    };
+  }
+
   const server = new GatewayServer({
     port,
     host,
     sessionManager,
     pairingManager,
     defaultSessionConfig,
+    agentRegistration,
   });
 
   // Create MessageRouter for channel → session routing.
@@ -269,9 +285,13 @@ export async function gateway(args: string[]): Promise<void> {
   console.log(`  ${BOLD}Engine${RESET}        ${engine ? engine.name : `${YELLOW}none (no API key)${RESET}`}`);
   console.log(`  ${BOLD}Memory${RESET}        ${memoryBackend ? config.memory.backend : `${DIM}disabled${RESET}`}`);
   console.log(`  ${BOLD}Voice${RESET}         ${voiceProcessor ? `${GREEN}enabled${RESET} (STT: ${voiceCfg?.stt.provider ?? '?'}, TTS: ${voiceCfg?.tts.provider ?? 'none'})` : `${DIM}disabled${RESET}`}`);
+  console.log(`  ${BOLD}Identity${RESET}      ${agentRegistration ? `${GREEN}enabled${RESET} (chain ${config.identity?.chainId ?? 8453})` : `${DIM}disabled${RESET}`}`);
   console.log('');
   console.log(`  ${DIM}Routes:${RESET}`);
   console.log(`  ${DIM}  GET    /health              - liveness probe${RESET}`);
+  if (agentRegistration) {
+    console.log(`  ${DIM}  GET    /.well-known/agent.json - agent discovery${RESET}`);
+  }
   console.log(`  ${DIM}  POST   /pair                - exchange pairing code for token${RESET}`);
   console.log(`  ${DIM}  GET    /sessions            - list active sessions${RESET}`);
   console.log(`  ${DIM}  POST   /sessions            - create a new session${RESET}`);
@@ -461,12 +481,23 @@ function handleInboundMessage(
         blockedPaths: config.security.blockedPaths,
       });
 
+      // Wire auto-memory hooks when memory is available and autoSave is on.
+      const autoSave = config.memory.autoSave !== false;
+      const onBeforeFirstRun = (memoryBackend && autoSave)
+        ? createAutoRecallHook(memoryBackend)
+        : undefined;
+      const onAfterComplete = (memoryBackend && autoSave)
+        ? createAutoSummarizeHook(memoryBackend)
+        : undefined;
+
       const loop = new AgentLoop(session, engine, tools.list(), observer, {
         maxIterations: 20, // Lower limit for channel messages.
         maxRetries: 2,
         enableStateSnapshots: false,
         memoryBackend,
         securityPolicy,
+        onBeforeFirstRun,
+        onAfterComplete,
       });
 
       let responseText = '';
