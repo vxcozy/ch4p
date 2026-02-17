@@ -22,9 +22,21 @@ import type {
   RunHandle,
   ResumeToken,
   EngineEvent,
+  ToolDefinition,
+  Message,
 } from '@ch4p/core';
 import { EngineError, generateId } from '@ch4p/core';
 import { spawn, type ChildProcess } from 'node:child_process';
+
+// ---------------------------------------------------------------------------
+// Internal types for tool call parsing
+// ---------------------------------------------------------------------------
+
+interface ParsedToolCall {
+  id: string;
+  tool: string;
+  args: unknown;
+}
 
 // ---------------------------------------------------------------------------
 // Auth-failure detection
@@ -176,11 +188,18 @@ export class SubprocessEngine implements IEngine {
 
     yield emit({ type: 'started' });
 
+    const hasTools = (job.tools?.length ?? 0) > 0;
+
     // Build command arguments.
     const args = [...this.baseArgs];
 
-    if (job.systemPrompt) {
-      args.push('--system-prompt', job.systemPrompt);
+    // System prompt: augmented with tool definitions when tools are present.
+    let systemPrompt = job.systemPrompt ?? '';
+    if (hasTools) {
+      systemPrompt += (systemPrompt ? '\n\n' : '') + this.buildToolPromptSection(job.tools!);
+    }
+    if (systemPrompt) {
+      args.push('--system-prompt', systemPrompt);
     }
 
     switch (this.promptMode) {
@@ -224,14 +243,19 @@ export class SubprocessEngine implements IEngine {
 
       let fullAnswer = '';
 
-      // Stream stdout as text deltas.
+      // Stream stdout. When tools are configured we buffer the full output
+      // and parse for tool_call blocks after completion. Without tools we
+      // emit text_delta events in real-time as today.
       if (child.stdout) {
         for await (const chunk of child.stdout) {
           if (abortController.signal.aborted) break;
 
           const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
           fullAnswer += text;
-          yield emit({ type: 'text_delta', delta: text });
+
+          if (!hasTools) {
+            yield emit({ type: 'text_delta', delta: text });
+          }
         }
       }
 
@@ -270,10 +294,24 @@ export class SubprocessEngine implements IEngine {
         return;
       }
 
-      yield emit({
-        type: 'completed',
-        answer: fullAnswer.trim(),
-      });
+      // When tools are configured, parse the buffered output for tool calls.
+      if (hasTools) {
+        const { text, toolCalls } = this.parseToolCalls(fullAnswer);
+
+        // Emit clean text (tool_call blocks stripped).
+        if (text) {
+          yield emit({ type: 'text_delta', delta: text });
+        }
+
+        // Emit tool_start events so the AgentLoop executes each tool.
+        for (const tc of toolCalls) {
+          yield emit({ type: 'tool_start', id: tc.id, tool: tc.tool, args: tc.args });
+        }
+
+        yield emit({ type: 'completed', answer: text });
+      } else {
+        yield emit({ type: 'completed', answer: fullAnswer.trim() });
+      }
     } catch (err) {
       if (abortController.signal.aborted) {
         yield emit({
@@ -358,34 +396,127 @@ export class SubprocessEngine implements IEngine {
   }
 
   // -----------------------------------------------------------------------
+  // Private: tool prompt injection
+  // -----------------------------------------------------------------------
+
+  /**
+   * Generate a system-prompt section that describes available tools and
+   * instructs the LLM to output structured `<tool_call>` blocks.
+   */
+  private buildToolPromptSection(tools: ToolDefinition[]): string {
+    const lines: string[] = [];
+    lines.push('<available_tools>');
+    lines.push('You have access to the following tools. When you need to use a tool, output a tool_call block in EXACTLY this format:');
+    lines.push('');
+    lines.push('<tool_call>');
+    lines.push('{"tool": "TOOL_NAME", "args": {ARGUMENTS_AS_JSON}}');
+    lines.push('</tool_call>');
+    lines.push('');
+    lines.push('Rules:');
+    lines.push('- You may include text before and after tool calls.');
+    lines.push('- You may make multiple tool calls in a single response.');
+    lines.push('- Do NOT wrap <tool_call> blocks in markdown code fences.');
+    lines.push('- The JSON inside <tool_call> must be valid JSON with "tool" (string) and "args" (object) keys.');
+    lines.push('- After a tool executes you will see its result and can continue.');
+    lines.push('');
+
+    for (let i = 0; i < tools.length; i++) {
+      const t = tools[i]!;
+      lines.push(`${i + 1}. ${t.name}`);
+      lines.push(`   Description: ${t.description}`);
+      lines.push(`   Parameters: ${JSON.stringify(t.parameters)}`);
+      lines.push('');
+    }
+
+    lines.push('</available_tools>');
+    return lines.join('\n');
+  }
+
+  // -----------------------------------------------------------------------
+  // Private: tool call parsing
+  // -----------------------------------------------------------------------
+
+  /**
+   * Extract `<tool_call>` blocks from subprocess output.
+   *
+   * Returns the clean text (tool blocks removed) and an array of parsed
+   * tool calls. Malformed JSON blocks are silently left in the text.
+   */
+  private parseToolCalls(output: string): { text: string; toolCalls: ParsedToolCall[] } {
+    const toolCalls: ParsedToolCall[] = [];
+    const regex = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
+    let text = output;
+
+    // Collect matches first, then remove from text (avoids index shifting).
+    const matches: Array<{ full: string; json: string }> = [];
+    let match;
+    while ((match = regex.exec(output)) !== null) {
+      matches.push({ full: match[0], json: match[1]! });
+    }
+
+    for (const m of matches) {
+      try {
+        const parsed = JSON.parse(m.json) as Record<string, unknown>;
+        if (typeof parsed.tool === 'string' && parsed.args !== undefined) {
+          toolCalls.push({
+            id: generateId(),
+            tool: parsed.tool,
+            args: parsed.args,
+          });
+          // Remove the matched block from the text output.
+          text = text.replace(m.full, '');
+        }
+      } catch {
+        // Malformed JSON — leave the block in text as-is.
+      }
+    }
+
+    return { text: text.trim(), toolCalls };
+  }
+
+  // -----------------------------------------------------------------------
   // Private: prompt extraction
   // -----------------------------------------------------------------------
 
   private extractPrompt(job: Job): string {
-    // When there is only one user message (no history), return it directly.
-    // When there are multiple messages (conversation history), build a
-    // multi-turn prompt so the subprocess CLI sees the full context.
     const userMessages = job.messages.filter((m) => m.role === 'user');
+    const hasToolMessages = job.messages.some((m) => m.role === 'tool');
 
-    if (userMessages.length <= 1) {
-      // Single message — extract it directly (most common case).
+    // Simple case: single user message with no tool history.
+    if (userMessages.length <= 1 && !hasToolMessages) {
       const msg = userMessages[0];
       if (!msg) return '';
       return this.extractMessageText(msg);
     }
 
-    // Multiple messages — build conversation context.
-    // Include user and assistant turns so the subprocess sees the full history.
+    // Multi-turn or tool-augmented history — build conversation context.
     const parts: string[] = [];
     parts.push('<conversation_history>');
 
     for (const msg of job.messages) {
-      if (msg.role === 'user' || msg.role === 'assistant') {
-        const text = this.extractMessageText(msg);
-        if (text) {
-          const label = msg.role === 'user' ? 'User' : 'Assistant';
-          parts.push(`[${label}]: ${text}`);
+      switch (msg.role) {
+        case 'user':
+        case 'assistant': {
+          const text = this.extractMessageText(msg);
+          if (text) {
+            const label = msg.role === 'user' ? 'User' : 'Assistant';
+            parts.push(`[${label}]: ${text}`);
+          }
+          // Include tool calls made by the assistant.
+          if (msg.role === 'assistant' && msg.toolCalls) {
+            for (const tc of msg.toolCalls) {
+              parts.push(`[Tool Call: ${tc.name}] ${JSON.stringify(tc.args)}`);
+            }
+          }
+          break;
         }
+        case 'tool': {
+          const content = this.extractMessageText(msg);
+          const toolName = this.findToolName(msg.toolCallId, job.messages);
+          parts.push(`[Tool Result${toolName ? ` (${toolName})` : ''}]: ${content}`);
+          break;
+        }
+        // 'system' role is handled via --system-prompt flag.
       }
     }
 
@@ -394,6 +525,18 @@ export class SubprocessEngine implements IEngine {
     parts.push('Continue the conversation. Respond to the most recent user message above.');
 
     return parts.join('\n');
+  }
+
+  /** Look up the tool name for a given toolCallId from the conversation. */
+  private findToolName(toolCallId: string | undefined, messages: Message[]): string | undefined {
+    if (!toolCallId) return undefined;
+    for (const msg of messages) {
+      if (msg.role === 'assistant' && msg.toolCalls) {
+        const tc = msg.toolCalls.find((c) => c.id === toolCallId);
+        if (tc) return tc.name;
+      }
+    }
+    return undefined;
   }
 
   /** Extract plain text from a Message's content field. */

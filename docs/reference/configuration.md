@@ -91,6 +91,10 @@ LLM provider configuration.
 | `retries` | `number` | `3` | Number of retry attempts on transient failures. |
 | `retryDelay` | `number` | `1000` | Base delay in ms between retries (exponential backoff). |
 
+### Subprocess engines and tool support
+
+When `engines.default` is set to `"claude-cli"` or `"codex-cli"`, ch4p wraps the CLI binary as a subprocess engine. Subprocess engines support tool execution (including `canvas_render`) via **prompt injection**: tool definitions are appended to the system prompt and the LLM is instructed to output `<tool_call>` XML blocks. The agent loop parses these blocks and executes tools in-process, then re-submits with tool results — exactly like the native engine path.
+
 ---
 
 ## channels
