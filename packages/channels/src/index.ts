@@ -21,6 +21,16 @@ export { TeamsChannel } from './teams.js';
 export type { TeamsConfig } from './teams.js';
 export { ZaloChannel } from './zalo.js';
 export type { ZaloConfig } from './zalo.js';
+export { ZaloPersonalChannel } from './zalo-personal.js';
+export type { ZaloPersonalConfig } from './zalo-personal.js';
+export { BlueBubblesChannel } from './bluebubbles.js';
+export type { BlueBubblesConfig } from './bluebubbles.js';
+export { GoogleChatChannel } from './googlechat.js';
+export type { GoogleChatConfig } from './googlechat.js';
+export { WebChatChannel } from './webchat.js';
+export type { WebChatConfig } from './webchat.js';
+export { IrcChannel } from './irc.js';
+export type { IrcConfig } from './irc.js';
 
 // Re-export channel-related types from core for convenience
 export type {

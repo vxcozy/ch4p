@@ -32,6 +32,11 @@ import {
   IMessageChannel,
   TeamsChannel,
   ZaloChannel,
+  ZaloPersonalChannel,
+  BlueBubblesChannel,
+  GoogleChatChannel,
+  WebChatChannel,
+  IrcChannel,
 } from '@ch4p/channels';
 import { createTunnelProvider } from '@ch4p/tunnels';
 import { Session, AgentLoop, ContextManager, FormatVerifier, LLMVerifier, createAutoRecallHook, createAutoSummarizeHook } from '@ch4p/agent';
@@ -88,6 +93,16 @@ function createChannelInstance(channelName: string): IChannel | null {
       return new TeamsChannel();
     case 'zalo':
       return new ZaloChannel();
+    case 'zalo-personal':
+      return new ZaloPersonalChannel();
+    case 'bluebubbles':
+      return new BlueBubblesChannel();
+    case 'googlechat':
+      return new GoogleChatChannel();
+    case 'webchat':
+      return new WebChatChannel();
+    case 'irc':
+      return new IrcChannel();
     default:
       return null;
   }

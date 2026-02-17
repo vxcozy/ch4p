@@ -158,15 +158,98 @@ Zalo Official Account via OA Open API v3.0.
 | `appSecret` | `string` | `null` | Zalo App Secret (required for token refresh). |
 | `allowedUsers` | `string[]` | `[]` | Allowed user IDs. Empty = all. |
 
+### channels.whatsapp
+
+WhatsApp Cloud API via Meta Graph API. Webhook-driven (no polling).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `accessToken` | `string` | **required** | Cloud API permanent access token. |
+| `phoneNumberId` | `string` | **required** | WhatsApp Business phone number ID. |
+| `verifyToken` | `string` | **required** | Webhook verification token (you define this). |
+| `appSecret` | `string` | `null` | Facebook app secret for HMAC-SHA256 payload verification. |
+| `apiVersion` | `string` | `"v21.0"` | Graph API version. |
+| `allowedNumbers` | `string[]` | `[]` | Phone number whitelist. Empty = all. |
+
+### channels.signal
+
+Signal messenger via signal-cli REST API.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `host` | `string` | `"localhost"` | signal-cli REST API host. |
+| `port` | `number` | `7583` | signal-cli REST API port. |
+| `account` | `string` | **required** | Signal account phone number (e.g., `"+15551234567"`). |
+| `allowedNumbers` | `string[]` | `[]` | Phone number whitelist. Empty = all. |
+| `reconnectInterval` | `number` | `5000` | WebSocket reconnect interval in ms. |
+
+### channels.imessage
+
+iMessage via macOS Messages database. Requires macOS with Full Disk Access for the running process.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `pollInterval` | `number` | `2000` | Database polling interval in ms. |
+| `allowedHandles` | `string[]` | `[]` | Phone/email whitelist. Empty = all. |
+| `dbPath` | `string` | `~/Library/Messages/chat.db` | Path to Messages SQLite database. |
+
 ### channels.irc
+
+IRC via raw TCP/TLS sockets. Zero external dependencies.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `server` | `string` | **required** | IRC server hostname. |
 | `port` | `number` | `6697` | Server port. |
 | `ssl` | `boolean` | `true` | Use TLS. |
-| `nick` | `string` | agent name | Bot nickname. |
-| `channels` | `string[]` | `[]` | Channels to join. |
+| `nick` | `string` | `"ch4p"` | Bot nickname. |
+| `channels` | `string[]` | `[]` | IRC channels to join (e.g., `["#general"]`). |
+| `password` | `string` | `null` | Server password. |
+| `allowedUsers` | `string[]` | `[]` | Nick whitelist. Empty = all. |
+| `reconnectDelay` | `number` | `5000` | Reconnect delay in ms. |
+
+### channels.bluebubbles
+
+iMessage via BlueBubbles server. Requires macOS with BlueBubbles installed.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `host` | `string` | **required** | BlueBubbles server URL (e.g., `"http://localhost:1234"`). |
+| `password` | `string` | **required** | BlueBubbles server password. |
+| `allowedAddresses` | `string[]` | `[]` | Phone/email whitelist. Empty = all. |
+
+### channels.googlechat
+
+Google Workspace Chat via service account JWT auth and REST API. Supports message editing.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `serviceAccountKey` | `string` | **required** | Service account key JSON (or `"${ENV_VAR}"`). |
+| `allowedSpaces` | `string[]` | `[]` | Space ID whitelist (e.g., `["spaces/AAAA"]`). Empty = all. |
+| `allowedUsers` | `string[]` | `[]` | User email whitelist. Empty = all. |
+| `verificationToken` | `string` | `null` | Google Chat webhook verification token. |
+
+### channels.webchat
+
+WebSocket-based browser chat widget. Lightweight alternative to Canvas.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `requireAuth` | `boolean` | `false` | Require authentication for WebSocket connections. |
+
+WebChat uses the gateway's existing pairing system for authentication when enabled. Clients connect via `ws://host:port/webchat`.
+
+### channels.zalo-personal
+
+Zalo Personal Account via lightweight REST bridge. **Warning:** Uses an unofficial API — may violate Zalo's TOS.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `bridgeUrl` | `string` | **required** | URL of the user's Zalo bridge server. |
+| `bridgeToken` | `string` | `null` | Bearer token for authenticating with the bridge. |
+| `allowedUsers` | `string[]` | `[]` | User ID whitelist. Empty = all. |
+
+The user must run their own Zalo automation bridge (e.g., via zca-js). ch4p communicates with the bridge via REST. A TOS warning is logged on startup.
 
 ---
 

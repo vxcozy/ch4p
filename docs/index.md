@@ -36,10 +36,18 @@ Practical recipes for specific tasks. Assumes you already understand the basics.
 - [Add a Provider](how-to/add-provider.md) — Implement IProvider for a new LLM
 - [Add a Channel](how-to/add-channel.md) — Implement IChannel for a new messaging surface
 - [Add a Tool](how-to/add-tool.md) — Create a custom tool with ITool
+- [Add a Verifier](how-to/add-verifier.md) — Implement IVerifier for custom task-level verification
 - [Configure Security](how-to/configure-security.md) — Filesystem scoping, command allowlists, autonomy levels
 - [Deploy the Gateway](how-to/deploy-gateway.md) — Run the gateway with a tunnel for external access
 - [Use Memory](how-to/use-memory.md) — Store, recall, and forget with hybrid search
 - [Use Canvas](how-to/use-canvas.md) — Launch the interactive canvas workspace and render A2UI components
+- [Use Web Search](how-to/use-web-search.md) — Configure Brave Search API for web search
+- [Use Browser](how-to/use-browser.md) — Set up Playwright-based browser automation
+- [Use Skills](how-to/use-skills.md) — Create and manage agent skills
+- [Use MCP](how-to/use-mcp.md) — Connect to Model Context Protocol servers
+- [Use Cron & Webhooks](how-to/use-cron-webhooks.md) — Schedule recurring tasks and webhook triggers
+- [Set Up Voice](how-to/setup-voice.md) — Configure STT (Whisper, Deepgram) and TTS (ElevenLabs)
+- [Use Observability](how-to/use-observability.md) — Logging, monitoring, and debugging
 - [Alternative LLM Setups](how-to/alternative-llm-setups.md) — Ollama, LiteLLM proxy, CLI passthrough
 
 ### Reference — Information-Oriented
@@ -67,7 +75,7 @@ The reasoning behind ch4p's design. Read when you want to understand "why."
 | Aspect | Detail |
 |---|---|
 | Language | TypeScript (Node.js) |
-| Channels | 14+ (Telegram, Discord, Slack, Matrix, IRC, and more) + interactive canvas |
+| Channels | 15 (Telegram, Discord, Slack, Matrix, IRC, Google Chat, BlueBubbles, WebChat, and more) + interactive canvas |
 | LLM Providers | 6 built-in (Anthropic, OpenAI, Google/Gemini, OpenRouter, Ollama, Bedrock) |
 | Memory | SQLite with FTS5 + vector hybrid search |
 | Concurrency | BEAM-inspired supervision trees with worker threads |
