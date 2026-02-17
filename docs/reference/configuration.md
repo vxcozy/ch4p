@@ -2,6 +2,12 @@
 
 ch4p is configured via `~/.ch4p/config.json`. This document lists every field, its type, default value, and valid options.
 
+### Environment variable resolution
+
+String values can reference environment variables with `${VAR_NAME}` syntax. For example, `"apiKey": "${ANTHROPIC_API_KEY}"` resolves to the value of `ANTHROPIC_API_KEY` from the environment. Missing variables resolve to an empty string.
+
+ch4p automatically loads `~/.ch4p/.env` at startup before resolving these references. The `.env` file supports `KEY=value` pairs, `#` comments, quoted values, and the optional `export` prefix. Shell environment variables always take precedence — values already set in the environment are never overwritten by `.env`.
+
 ---
 
 ## Top-Level Structure

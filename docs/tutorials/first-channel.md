@@ -96,11 +96,13 @@ Save and close the file.
 
 ## Step 4: Start the Gateway
 
-Source your secrets, then start the gateway:
+Start the gateway:
 
 ```bash
-export $(cat ~/.ch4p/.env | xargs) && ch4p gateway
+ch4p gateway
 ```
+
+ch4p automatically loads `~/.ch4p/.env` at startup, so you don't need to source it manually.
 
 You will see the gateway boot with the Telegram channel:
 
@@ -149,7 +151,7 @@ Press `Ctrl+C` in the terminal. The gateway performs a graceful shutdown, discon
 ## What You Learned
 
 1. **BotFather** — Telegram bots are created through BotFather, which gives you a token.
-2. **Secrets management** — Tokens go in `~/.ch4p/.env`, referenced via `${VAR_NAME}` in config.
+2. **Secrets management** — Tokens go in `~/.ch4p/.env` (auto-loaded at startup), referenced via `${VAR_NAME}` in config.
 3. **Configuration** — Channel settings go in the `channels` section of `config.json`.
 4. **Gateway** — `ch4p gateway` manages all external channel connections.
 5. **Routing** — Messages flow from Telegram through the gateway to the agent and back.

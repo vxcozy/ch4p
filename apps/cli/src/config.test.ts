@@ -36,6 +36,7 @@ import {
   getLogsDir,
   getDefaultConfig,
   loadConfig,
+  loadEnvFile,
   saveConfig,
   ensureConfigDir,
   configExists,
@@ -488,5 +489,144 @@ describe('ConfigLoadError', () => {
     expect(err.message).toBe('test message');
     expect(err).toBeInstanceOf(Error);
     expect(err).toBeInstanceOf(ConfigLoadError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadEnvFile tests
+// ---------------------------------------------------------------------------
+
+describe('loadEnvFile', () => {
+  function writeEnvFile(content: string): void {
+    const ch4pDir = join(TEST_HOME, '.ch4p');
+    mkdirSync(ch4pDir, { recursive: true });
+    writeFileSync(join(ch4pDir, '.env'), content);
+  }
+
+  /** Track env vars set during a test so we can clean them up. */
+  function cleanupEnvVars(...keys: string[]): void {
+    for (const key of keys) {
+      delete process.env[key];
+    }
+  }
+
+  it('returns 0 when no .env file exists', () => {
+    expect(loadEnvFile()).toBe(0);
+  });
+
+  it('loads KEY=value pairs into process.env', () => {
+    writeEnvFile('CH4P_TEST_A=hello\nCH4P_TEST_B=world\n');
+
+    try {
+      const loaded = loadEnvFile();
+      expect(loaded).toBe(2);
+      expect(process.env['CH4P_TEST_A']).toBe('hello');
+      expect(process.env['CH4P_TEST_B']).toBe('world');
+    } finally {
+      cleanupEnvVars('CH4P_TEST_A', 'CH4P_TEST_B');
+    }
+  });
+
+  it('strips double quotes from values', () => {
+    writeEnvFile('CH4P_TEST_QUOTED="quoted value"');
+
+    try {
+      loadEnvFile();
+      expect(process.env['CH4P_TEST_QUOTED']).toBe('quoted value');
+    } finally {
+      cleanupEnvVars('CH4P_TEST_QUOTED');
+    }
+  });
+
+  it('strips single quotes from values', () => {
+    writeEnvFile("CH4P_TEST_SINGLE='single quoted'");
+
+    try {
+      loadEnvFile();
+      expect(process.env['CH4P_TEST_SINGLE']).toBe('single quoted');
+    } finally {
+      cleanupEnvVars('CH4P_TEST_SINGLE');
+    }
+  });
+
+  it('skips blank lines and comments', () => {
+    writeEnvFile('# This is a comment\n\nCH4P_TEST_C=value\n# Another comment\n\n');
+
+    try {
+      const loaded = loadEnvFile();
+      expect(loaded).toBe(1);
+      expect(process.env['CH4P_TEST_C']).toBe('value');
+    } finally {
+      cleanupEnvVars('CH4P_TEST_C');
+    }
+  });
+
+  it('handles export prefix', () => {
+    writeEnvFile('export CH4P_TEST_EXPORT=exported_value');
+
+    try {
+      loadEnvFile();
+      expect(process.env['CH4P_TEST_EXPORT']).toBe('exported_value');
+    } finally {
+      cleanupEnvVars('CH4P_TEST_EXPORT');
+    }
+  });
+
+  it('does not overwrite existing environment variables', () => {
+    process.env['CH4P_TEST_EXISTING'] = 'original';
+    writeEnvFile('CH4P_TEST_EXISTING=overwritten');
+
+    try {
+      const loaded = loadEnvFile();
+      expect(loaded).toBe(0);
+      expect(process.env['CH4P_TEST_EXISTING']).toBe('original');
+    } finally {
+      cleanupEnvVars('CH4P_TEST_EXISTING');
+    }
+  });
+
+  it('skips lines without = sign', () => {
+    writeEnvFile('INVALID_LINE_WITHOUT_EQUALS\nCH4P_TEST_VALID=yes');
+
+    try {
+      const loaded = loadEnvFile();
+      expect(loaded).toBe(1);
+      expect(process.env['CH4P_TEST_VALID']).toBe('yes');
+    } finally {
+      cleanupEnvVars('CH4P_TEST_VALID');
+    }
+  });
+
+  it('handles values with = signs in them', () => {
+    writeEnvFile('CH4P_TEST_EQ=base64==value');
+
+    try {
+      loadEnvFile();
+      expect(process.env['CH4P_TEST_EQ']).toBe('base64==value');
+    } finally {
+      cleanupEnvVars('CH4P_TEST_EQ');
+    }
+  });
+
+  it('loadConfig automatically loads .env before resolving vars', () => {
+    // Write a .env file with a test API key.
+    writeEnvFile('CH4P_TEST_API_KEY=sk-test-from-dotenv');
+
+    // Write a config that references it.
+    writeTestConfig({
+      providers: {
+        test: {
+          apiKey: '${CH4P_TEST_API_KEY}',
+        },
+      },
+    });
+
+    try {
+      const config = loadConfig();
+      const testProvider = config.providers['test'] as Record<string, unknown>;
+      expect(testProvider?.apiKey).toBe('sk-test-from-dotenv');
+    } finally {
+      cleanupEnvVars('CH4P_TEST_API_KEY');
+    }
   });
 });

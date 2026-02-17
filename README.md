@@ -194,7 +194,7 @@ corepack pnpm --filter @ch4p/core build
 - ESM-only (all imports use `.js` extension)
 - Zero required external runtime dependencies for core, security, and CLI packages (`playwright-core` is optional for browser tool)
 - `tsup` for bundling, `vitest` for testing, `vite` for web frontend (code-split with lazy loading)
-- 68 test files, 2012 tests
+- 68 test files, 2022 tests
 
 ## Configuration
 
@@ -220,7 +220,7 @@ Configuration lives in `~/.ch4p/config.json`. The onboarding wizard (`ch4p onboa
 }
 ```
 
-Environment variables referenced as `${VAR_NAME}` are resolved at load time.
+Environment variables referenced as `${VAR_NAME}` are resolved at load time. ch4p automatically loads `~/.ch4p/.env` at startup — no manual sourcing required. Shell environment variables take precedence over `.env` values.
 
 ### Alternative LLM Setups
 

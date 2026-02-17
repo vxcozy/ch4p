@@ -158,11 +158,13 @@ Reference tokens in `config.json` using `${VAR_NAME}` syntax:
 }
 ```
 
-Source the env file before starting the gateway:
+ch4p automatically loads `~/.ch4p/.env` at startup, so just run:
 
 ```bash
-export $(cat ~/.ch4p/.env | xargs) && ch4p gateway
+ch4p gateway
 ```
+
+Existing shell environment variables take precedence over `.env` values — you can still override with `export VAR=value && ch4p gateway` if needed.
 
 ---
 

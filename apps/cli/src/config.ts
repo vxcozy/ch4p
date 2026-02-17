@@ -122,6 +122,75 @@ export function getDefaultConfig(): Ch4pConfig {
 }
 
 // ---------------------------------------------------------------------------
+// .env file loading
+// ---------------------------------------------------------------------------
+
+/**
+ * Load variables from ~/.ch4p/.env into process.env.
+ *
+ * Supports:
+ *   - KEY=value
+ *   - KEY="quoted value"
+ *   - KEY='single quoted value'
+ *   - # comments and blank lines
+ *   - export KEY=value (optional export prefix)
+ *
+ * Existing environment variables are NOT overwritten — the shell environment
+ * always takes precedence. This matches the behavior of dotenv and similar
+ * tools, and means `export FOO=bar && ch4p gateway` still wins.
+ *
+ * Zero external dependencies.
+ */
+export function loadEnvFile(): number {
+  const envPath = join(getCh4pDir(), '.env');
+
+  let raw: string;
+  try {
+    raw = readFileSync(envPath, 'utf8');
+  } catch {
+    // No .env file — perfectly fine, nothing to do.
+    return 0;
+  }
+
+  let loaded = 0;
+
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+
+    // Skip blank lines and comments.
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    // Strip optional `export ` prefix.
+    const stripped = trimmed.startsWith('export ')
+      ? trimmed.slice(7).trim()
+      : trimmed;
+
+    // Match KEY=VALUE (value may be quoted).
+    const eqIdx = stripped.indexOf('=');
+    if (eqIdx === -1) continue;
+
+    const key = stripped.slice(0, eqIdx).trim();
+    let value = stripped.slice(eqIdx + 1).trim();
+
+    // Remove surrounding quotes if present.
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+
+    // Don't overwrite existing env vars — shell takes precedence.
+    if (key && process.env[key] === undefined) {
+      process.env[key] = value;
+      loaded++;
+    }
+  }
+
+  return loaded;
+}
+
+// ---------------------------------------------------------------------------
 // Environment variable resolution
 // ---------------------------------------------------------------------------
 
@@ -254,6 +323,10 @@ export function ensureConfigDir(): void {
  * Throws ConfigLoadError if validation fails.
  */
 export function loadConfig(): Ch4pConfig {
+  // Load ~/.ch4p/.env into process.env before resolving config references.
+  // Existing shell env vars take precedence (won't be overwritten).
+  loadEnvFile();
+
   const defaults = getDefaultConfig();
   let merged: Ch4pConfig = defaults;
 
