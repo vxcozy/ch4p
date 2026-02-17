@@ -362,21 +362,50 @@ export class SubprocessEngine implements IEngine {
   // -----------------------------------------------------------------------
 
   private extractPrompt(job: Job): string {
-    // Find the last user message.
-    for (let i = job.messages.length - 1; i >= 0; i--) {
-      const msg = job.messages[i]!;
-      if (msg.role === 'user') {
-        if (typeof msg.content === 'string') {
-          return msg.content;
-        }
-        // Extract text from content blocks.
-        if (Array.isArray(msg.content)) {
-          return msg.content
-            .filter((b) => b.type === 'text')
-            .map((b) => b.text ?? '')
-            .join('\n');
+    // When there is only one user message (no history), return it directly.
+    // When there are multiple messages (conversation history), build a
+    // multi-turn prompt so the subprocess CLI sees the full context.
+    const userMessages = job.messages.filter((m) => m.role === 'user');
+
+    if (userMessages.length <= 1) {
+      // Single message — extract it directly (most common case).
+      const msg = userMessages[0];
+      if (!msg) return '';
+      return this.extractMessageText(msg);
+    }
+
+    // Multiple messages — build conversation context.
+    // Include user and assistant turns so the subprocess sees the full history.
+    const parts: string[] = [];
+    parts.push('<conversation_history>');
+
+    for (const msg of job.messages) {
+      if (msg.role === 'user' || msg.role === 'assistant') {
+        const text = this.extractMessageText(msg);
+        if (text) {
+          const label = msg.role === 'user' ? 'User' : 'Assistant';
+          parts.push(`[${label}]: ${text}`);
         }
       }
+    }
+
+    parts.push('</conversation_history>');
+    parts.push('');
+    parts.push('Continue the conversation. Respond to the most recent user message above.');
+
+    return parts.join('\n');
+  }
+
+  /** Extract plain text from a Message's content field. */
+  private extractMessageText(msg: { content: string | Array<{ type: string; text?: string }> }): string {
+    if (typeof msg.content === 'string') {
+      return msg.content;
+    }
+    if (Array.isArray(msg.content)) {
+      return msg.content
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text ?? '')
+        .join('\n');
     }
     return '';
   }
