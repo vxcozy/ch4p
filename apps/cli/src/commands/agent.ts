@@ -30,20 +30,7 @@ import { DefaultSecurityPolicy } from '@ch4p/security';
 import { SkillRegistry } from '@ch4p/skills';
 import { loadConfig, getLogsDir } from '../config.js';
 import { playBriefSplash } from './splash.js';
-
-// ---------------------------------------------------------------------------
-// ANSI color helpers
-// ---------------------------------------------------------------------------
-
-const RESET = '\x1b[0m';
-const BOLD = '\x1b[1m';
-const DIM = '\x1b[2m';
-const CYAN = '\x1b[36m';
-const GREEN = '\x1b[32m';
-const YELLOW = '\x1b[33m';
-const RED = '\x1b[31m';
-const MAGENTA = '\x1b[35m';
-const BLUE = '\x1b[34m';
+import { TEAL, RESET, BOLD, DIM, GREEN, YELLOW, RED, MAGENTA, BLUE, box, separator } from '../ui.js';
 
 // ---------------------------------------------------------------------------
 // AgentEvent output handler
@@ -539,14 +526,14 @@ async function runAgentMessage(
 
 const REPL_HELP = `
   ${BOLD}Special Commands${RESET}
-  ${DIM}${'='.repeat(40)}${RESET}
-  ${CYAN}/exit${RESET}     Exit the session
-  ${CYAN}/clear${RESET}    Clear conversation history
-  ${CYAN}/audit${RESET}    Run security audit
-  ${CYAN}/memory${RESET}   Show memory status
-  ${CYAN}/tools${RESET}    List available tools
-  ${CYAN}/skills${RESET}   List available skills
-  ${CYAN}/help${RESET}     Show this help
+${separator()}
+  ${TEAL}/exit${RESET}     Exit the session
+  ${TEAL}/clear${RESET}    Clear conversation history
+  ${TEAL}/audit${RESET}    Run security audit
+  ${TEAL}/memory${RESET}   Show memory status
+  ${TEAL}/tools${RESET}    List available tools
+  ${TEAL}/skills${RESET}   List available skills
+  ${TEAL}/help${RESET}     Show this help
 `;
 
 // ---------------------------------------------------------------------------
@@ -585,7 +572,7 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
     await playBriefSplash();
   }
 
-  console.log(`  ${DIM}Interactive mode. Type ${CYAN}/help${DIM} for commands, ${CYAN}/exit${DIM} to quit.${RESET}`);
+  console.log(`  ${DIM}Interactive mode. Type ${TEAL}/help${DIM} for commands, ${TEAL}/exit${DIM} to quit.${RESET}`);
   console.log(`  ${DIM}Engine: ${engine.name} | Model: ${config.agent.model} | Autonomy: ${config.autonomy.level}${RESET}`);
   console.log(`  ${DIM}Tools: ${tools.names().join(', ')}${RESET}`);
   console.log(`  ${DIM}Memory: ${memoryBackend ? `${config.memory.backend}${autoSave ? ' (auto)' : ''}` : 'disabled'}${RESET}`);
@@ -597,7 +584,7 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: `${GREEN}${BOLD}> ${RESET}`,
+    prompt: `${TEAL}${BOLD}> ${RESET}`,
     historySize: 200,
   });
 
@@ -673,7 +660,7 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
         case '/tools':
           console.log(`\n  ${BOLD}Available Tools${RESET} ${DIM}(${tools.size})${RESET}`);
           for (const tool of tools.list()) {
-            console.log(`  ${CYAN}${tool.name}${RESET} ${DIM}[${tool.weight}]${RESET} ${tool.description}`);
+            console.log(`  ${TEAL}${tool.name}${RESET} ${DIM}[${tool.weight}]${RESET} ${tool.description}`);
           }
           console.log('');
           rl.prompt();
@@ -685,7 +672,7 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
           } else {
             console.log(`\n  ${BOLD}Available Skills${RESET} ${DIM}(${skillRegistry.size})${RESET}`);
             for (const skill of skillRegistry.list()) {
-              console.log(`  ${CYAN}${skill.manifest.name}${RESET} ${DIM}(${skill.source})${RESET} ${skill.manifest.description}`);
+              console.log(`  ${TEAL}${skill.manifest.name}${RESET} ${DIM}(${skill.source})${RESET} ${skill.manifest.description}`);
             }
             console.log('');
           }
@@ -777,7 +764,7 @@ export async function agent(args: string[]): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`\n  ${RED}Failed to load config:${RESET} ${message}`);
-    console.error(`  ${DIM}Run ${CYAN}ch4p onboard${DIM} to set up ch4p.${RESET}\n`);
+    console.error(`  ${DIM}Run ${TEAL}ch4p onboard${DIM} to set up ch4p.${RESET}\n`);
     process.exitCode = 1;
     return;
   }

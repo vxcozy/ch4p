@@ -22,18 +22,7 @@ import {
   IMessageChannel,
 } from '@ch4p/channels';
 import type { IChannel, OutboundMessage, Recipient } from '@ch4p/core';
-
-// ---------------------------------------------------------------------------
-// ANSI color helpers
-// ---------------------------------------------------------------------------
-
-const RESET = '\x1b[0m';
-const BOLD = '\x1b[1m';
-const DIM = '\x1b[2m';
-const CYAN = '\x1b[36m';
-const GREEN = '\x1b[32m';
-const YELLOW = '\x1b[33m';
-const RED = '\x1b[31m';
+import { TEAL, RESET, BOLD, DIM, GREEN, YELLOW, RED, separator } from '../ui.js';
 
 // ---------------------------------------------------------------------------
 // Channel factory
@@ -136,7 +125,7 @@ export async function message(args: string[]): Promise<void> {
   } catch (err) {
     const errMessage = err instanceof Error ? err.message : String(err);
     console.error(`\n  ${RED}Failed to load config:${RESET} ${errMessage}`);
-    console.error(`  ${DIM}Run ${CYAN}ch4p onboard${DIM} to set up ch4p.${RESET}\n`);
+    console.error(`  ${DIM}Run ${TEAL}ch4p onboard${DIM} to set up ch4p.${RESET}\n`);
     process.exitCode = 1;
     return;
   }
@@ -167,8 +156,9 @@ export async function message(args: string[]): Promise<void> {
     return;
   }
 
-  console.log(`\n  ${CYAN}${BOLD}ch4p Message${RESET}`);
-  console.log(`  ${DIM}${'='.repeat(50)}${RESET}\n`);
+  console.log(`\n  ${TEAL}${BOLD}ch4p Message${RESET}`);
+  console.log(separator());
+  console.log('');
   console.log(`  ${BOLD}Channel${RESET}   ${parsed.channel}`);
   if (parsed.threadId) {
     console.log(`  ${BOLD}Thread${RESET}    ${parsed.threadId}`);

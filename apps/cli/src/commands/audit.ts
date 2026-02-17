@@ -8,18 +8,16 @@
 
 import type { Ch4pConfig, AuditResult, AuditSeverity } from '@ch4p/core';
 import { loadConfig } from '../config.js';
-
-// ---------------------------------------------------------------------------
-// ANSI color helpers
-// ---------------------------------------------------------------------------
-
-const RESET = '\x1b[0m';
-const BOLD = '\x1b[1m';
-const DIM = '\x1b[2m';
-const GREEN = '\x1b[32m';
-const YELLOW = '\x1b[33m';
-const RED = '\x1b[31m';
-const CYAN = '\x1b[36m';
+import {
+  TEAL,
+  RESET,
+  BOLD,
+  DIM,
+  GREEN,
+  YELLOW,
+  RED,
+  box,
+} from '../ui.js';
 
 // ---------------------------------------------------------------------------
 // Severity formatting
@@ -211,29 +209,30 @@ export function performAudit(config: Ch4pConfig): AuditResult[] {
 export function runAudit(config: Ch4pConfig): void {
   const results = performAudit(config);
 
-  console.log(`  ${CYAN}${BOLD}ch4p Security Audit${RESET}`);
-  console.log(`  ${DIM}${'='.repeat(50)}${RESET}`);
-
+  const lines: string[] = [];
   for (const r of results) {
     const padId = String(r.id).padStart(2, ' ');
-    console.log(`  ${severityPrefix(r.severity)} ${DIM}${padId}.${RESET} ${r.message}`);
+    lines.push(`${severityPrefix(r.severity)} ${DIM}${padId}.${RESET} ${r.message}`);
   }
 
   const passed = results.filter((r) => r.severity === 'pass').length;
   const warned = results.filter((r) => r.severity === 'warn').length;
   const failed = results.filter((r) => r.severity === 'fail').length;
 
-  console.log(`  ${DIM}${'='.repeat(50)}${RESET}`);
-  console.log(
-    `  ${severityIcon('pass')} ${passed}  ` +
+  lines.push('');
+  lines.push(
+    `${severityIcon('pass')} ${passed}  ` +
     `${severityIcon('warn')} ${warned}  ` +
     `${severityIcon('fail')} ${failed}  ` +
     `${DIM}(${results.length} checks)${RESET}`,
   );
 
   if (failed > 0) {
-    console.log(`\n  ${RED}${BOLD}Action required:${RESET} ${failed} check(s) failed. Review your config.`);
+    lines.push('');
+    lines.push(`${RED}${BOLD}Action required:${RESET} ${failed} check(s) failed. Review your config.`);
   }
+
+  console.log(box('ch4p Security Audit', lines));
 }
 
 // ---------------------------------------------------------------------------
@@ -253,7 +252,7 @@ export async function audit(): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`\n  ${RED}Failed to load config:${RESET} ${message}`);
-    console.error(`  ${DIM}Run ${CYAN}ch4p onboard${DIM} to create a config file.${RESET}\n`);
+    console.error(`  ${DIM}Run ${TEAL}ch4p onboard${DIM} to create a config file.${RESET}\n`);
     process.exitCode = 1;
   }
 }

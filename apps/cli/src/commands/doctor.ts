@@ -12,18 +12,7 @@
 import { existsSync } from 'node:fs';
 import { loadConfig, getConfigPath, getCh4pDir, configExists } from '../config.js';
 import { performAudit } from './audit.js';
-
-// ---------------------------------------------------------------------------
-// ANSI color helpers
-// ---------------------------------------------------------------------------
-
-const RESET = '\x1b[0m';
-const BOLD = '\x1b[1m';
-const DIM = '\x1b[2m';
-const CYAN = '\x1b[36m';
-const GREEN = '\x1b[32m';
-const YELLOW = '\x1b[33m';
-const RED = '\x1b[31m';
+import { TEAL, RESET, BOLD, DIM, GREEN, YELLOW, RED, separator } from '../ui.js';
 
 // ---------------------------------------------------------------------------
 // Check result type
@@ -260,8 +249,9 @@ function checkSecurityAudit(): CheckResult {
 // ---------------------------------------------------------------------------
 
 export async function doctor(): Promise<void> {
-  console.log(`\n  ${CYAN}${BOLD}ch4p Doctor${RESET}`);
-  console.log(`  ${DIM}${'='.repeat(50)}${RESET}\n`);
+  console.log(`\n  ${TEAL}${BOLD}ch4p Doctor${RESET}`);
+  console.log(separator());
+  console.log('');
 
   const checks: CheckResult[] = [
     checkNodeVersion(),
@@ -281,7 +271,7 @@ export async function doctor(): Promise<void> {
   const warnCount = checks.filter((c) => c.status === 'warn').length;
   const failCount = checks.filter((c) => c.status === 'fail').length;
 
-  console.log(`\n  ${DIM}${'='.repeat(50)}${RESET}`);
+  console.log(`\n${separator()}`);
   console.log(
     `  ${statusIcon('ok')} ${okCount}  ` +
     `${statusIcon('warn')} ${warnCount}  ` +

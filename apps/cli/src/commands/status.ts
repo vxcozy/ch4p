@@ -8,26 +8,16 @@
 import { existsSync } from 'node:fs';
 import type { Ch4pConfig } from '@ch4p/core';
 import { loadConfig, getConfigPath, getCh4pDir } from '../config.js';
-
-// ---------------------------------------------------------------------------
-// ANSI color helpers
-// ---------------------------------------------------------------------------
-
-const RESET = '\x1b[0m';
-const BOLD = '\x1b[1m';
-const DIM = '\x1b[2m';
-const CYAN = '\x1b[36m';
-const GREEN = '\x1b[32m';
-const YELLOW = '\x1b[33m';
-const RED = '\x1b[31m';
+import { TEAL, RESET, BOLD, DIM, GREEN, YELLOW, RED, box, kvRow, separator } from '../ui.js';
 
 // ---------------------------------------------------------------------------
 // Status display
 // ---------------------------------------------------------------------------
 
 export async function status(): Promise<void> {
-  console.log(`\n  ${CYAN}${BOLD}ch4p Status${RESET}`);
-  console.log(`  ${DIM}${'='.repeat(50)}${RESET}\n`);
+  console.log(`\n  ${TEAL}${BOLD}ch4p Status${RESET}`);
+  console.log(separator());
+  console.log('');
 
   // Version
   console.log(`  ${BOLD}Version${RESET}          0.1.0`);
@@ -47,7 +37,7 @@ export async function status(): Promise<void> {
 
   if (!configExists) {
     console.log(`\n  ${YELLOW}No configuration found.${RESET}`);
-    console.log(`  ${DIM}Run ${CYAN}ch4p onboard${DIM} to set up ch4p.${RESET}\n`);
+    console.log(`  ${DIM}Run ${TEAL}ch4p onboard${DIM} to set up ch4p.${RESET}\n`);
     return;
   }
 

@@ -9,16 +9,17 @@
  * Skippable: any keypress cancels the animation immediately.
  */
 
-// ---------------------------------------------------------------------------
-// ANSI color helpers
-// ---------------------------------------------------------------------------
-
-const RESET = '\x1b[0m';
-const BOLD = '\x1b[1m';
-const DIM = '\x1b[2m';
-const CYAN = '\x1b[36m';
-const GREEN = '\x1b[32m';
-const WHITE = '\x1b[37m';
+import {
+  TEAL,
+  RESET,
+  BOLD,
+  DIM,
+  GREEN,
+  WHITE,
+  centerPad,
+  termWidth,
+  visibleLength,
+} from '../ui.js';
 
 // ---------------------------------------------------------------------------
 // ANSI cursor control
@@ -89,20 +90,6 @@ const CHAPPIE_ART = [
 
 function isTTY(): boolean {
   return Boolean(process.stdout.isTTY);
-}
-
-function getTerminalWidth(): number {
-  return process.stdout.columns ?? 80;
-}
-
-function stripAnsi(str: string): number {
-  return str.replace(/\x1b\[[0-9;]*m/g, '').length;
-}
-
-function centerPad(line: string, termWidth: number): string {
-  const visible = stripAnsi(line);
-  const pad = Math.max(0, Math.floor((termWidth - visible) / 2));
-  return ' '.repeat(pad) + line;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +194,7 @@ async function typewrite(
 // ---------------------------------------------------------------------------
 
 function renderArtStatic(color: string): void {
-  const width = getTerminalWidth();
+  const width = termWidth();
   for (const line of CHAPPIE_ART) {
     const colored = `${color}${line}${RESET}`;
     console.log(centerPad(colored, width));
@@ -222,9 +209,9 @@ export async function playFullAnimation(): Promise<void> {
   if (!isTTY()) {
     // Non-interactive: static display.
     console.log('');
-    renderArtStatic(CYAN);
+    renderArtStatic(TEAL);
     console.log('');
-    console.log(`  ${CYAN}${BOLD}ch4p${RESET} ${DIM}v${getVersion()}${RESET}`);
+    console.log(`  ${TEAL}${BOLD}ch4p${RESET} ${DIM}v${getVersion()}${RESET}`);
     console.log(`  ${DIM}Hello! I'm ch4p, your personal AI assistant.${RESET}`);
     console.log(`  ${DIM}Security-first. BEAM-inspired. Zero-dependency memory.${RESET}`);
     console.log('');
@@ -235,13 +222,13 @@ export async function playFullAnimation(): Promise<void> {
     const { skipped, cleanup } = createSkipController();
 
     try {
-      const width = getTerminalWidth();
+      const width = termWidth();
       const lineCount = CHAPPIE_ART.length;
 
       console.log('');
 
       // Scan-line reveal: draw each line top-to-bottom.
-      // Current line is bright (WHITE+BOLD), previous line dims to CYAN.
+      // Current line is bright (WHITE+BOLD), previous line dims to TEAL.
       for (let i = 0; i < lineCount; i++) {
         const line = CHAPPIE_ART[i]!;
 
@@ -249,7 +236,7 @@ export async function playFullAnimation(): Promise<void> {
         if (i > 0) {
           process.stdout.write(MOVE_UP(1));
           process.stdout.write(CLEAR_LINE);
-          const dimmed = `${CYAN}${CHAPPIE_ART[i - 1]}${RESET}`;
+          const dimmed = `${TEAL}${CHAPPIE_ART[i - 1]}${RESET}`;
           process.stdout.write(centerPad(dimmed, width) + '\n');
         }
 
@@ -266,7 +253,7 @@ export async function playFullAnimation(): Promise<void> {
           }
           process.stdout.write(MOVE_UP(i + 2));
           console.log('');
-          renderArtStatic(CYAN);
+          renderArtStatic(TEAL);
           break;
         }
       }
@@ -275,7 +262,7 @@ export async function playFullAnimation(): Promise<void> {
       if (lineCount > 0) {
         process.stdout.write(MOVE_UP(1));
         process.stdout.write(CLEAR_LINE);
-        const lastDimmed = `${CYAN}${CHAPPIE_ART[lineCount - 1]}${RESET}`;
+        const lastDimmed = `${TEAL}${CHAPPIE_ART[lineCount - 1]}${RESET}`;
         process.stdout.write(centerPad(lastDimmed, width) + '\n');
       }
 
@@ -288,7 +275,7 @@ export async function playFullAnimation(): Promise<void> {
       // Typewriter welcome.
       console.log('');
       const welcome =
-        `  ${CYAN}${BOLD}ch4p${RESET} ${DIM}v${getVersion()}${RESET}\n` +
+        `  ${TEAL}${BOLD}ch4p${RESET} ${DIM}v${getVersion()}${RESET}\n` +
         `  ${DIM}Hello! I'm ch4p, your personal AI assistant.${RESET}\n` +
         `  ${DIM}Security-first. BEAM-inspired. Zero-dependency memory.${RESET}\n`;
 
@@ -326,7 +313,7 @@ export async function playBriefSplash(): Promise<void> {
 
       // Quick typewriter version line.
       console.log('');
-      const versionLine = `  ${CYAN}${BOLD}ch4p${RESET} ${DIM}v${getVersion()}${RESET} ${GREEN}ready.${RESET}\n`;
+      const versionLine = `  ${TEAL}${BOLD}ch4p${RESET} ${DIM}v${getVersion()}${RESET} ${GREEN}ready.${RESET}\n`;
       await typewrite(versionLine, skipped, 15);
 
       await delay(100, skipped);

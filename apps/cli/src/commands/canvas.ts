@@ -29,18 +29,7 @@ import { DefaultSecurityPolicy } from '@ch4p/security';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
-
-// ---------------------------------------------------------------------------
-// ANSI color helpers
-// ---------------------------------------------------------------------------
-
-const RESET = '\x1b[0m';
-const BOLD = '\x1b[1m';
-const DIM = '\x1b[2m';
-const CYAN = '\x1b[36m';
-const GREEN = '\x1b[32m';
-const YELLOW = '\x1b[33m';
-const RED = '\x1b[31m';
+import { TEAL, RESET, BOLD, DIM, GREEN, YELLOW, RED, separator } from '../ui.js';
 
 // ---------------------------------------------------------------------------
 // CLI entry point
@@ -53,7 +42,7 @@ export async function canvas(args: string[]): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`\n  ${RED}Failed to load config:${RESET} ${message}`);
-    console.error(`  ${DIM}Run ${CYAN}ch4p onboard${DIM} to set up ch4p.${RESET}\n`);
+    console.error(`  ${DIM}Run ${TEAL}ch4p onboard${DIM} to set up ch4p.${RESET}\n`);
     process.exitCode = 1;
     return;
   }
@@ -89,7 +78,7 @@ export async function canvas(args: string[]): Promise<void> {
   const engine = createCanvasEngine(config);
   if (!engine) {
     console.error(`\n  ${RED}No LLM engine available.${RESET}`);
-    console.error(`  ${DIM}Ensure an API key is configured. Run ${CYAN}ch4p onboard${DIM}.${RESET}\n`);
+    console.error(`  ${DIM}Ensure an API key is configured. Run ${TEAL}ch4p onboard${DIM}.${RESET}\n`);
     process.exitCode = 1;
     return;
   }
@@ -162,8 +151,9 @@ export async function canvas(args: string[]): Promise<void> {
   });
 
   // Print startup banner.
-  console.log(`\n  ${CYAN}${BOLD}ch4p Canvas${RESET}`);
-  console.log(`  ${DIM}${'='.repeat(50)}${RESET}\n`);
+  console.log(`\n  ${TEAL}${BOLD}ch4p Canvas${RESET}`);
+  console.log(separator());
+  console.log('');
 
   try {
     await server.start();
@@ -191,12 +181,12 @@ export async function canvas(args: string[]): Promise<void> {
 
   if (pairingManager) {
     const code = pairingManager.generateCode('Canvas startup');
-    console.log(`  ${BOLD}Pairing code:${RESET} ${CYAN}${BOLD}${code.code}${RESET}`);
+    console.log(`  ${BOLD}Pairing code:${RESET} ${TEAL}${BOLD}${code.code}${RESET}`);
     console.log(`  ${DIM}Add ?token=YOUR_TOKEN to the URL after pairing.${RESET}`);
     console.log('');
   }
 
-  console.log(`  ${GREEN}${BOLD}Canvas URL:${RESET} ${CYAN}${url}${RESET}`);
+  console.log(`  ${GREEN}${BOLD}Canvas URL:${RESET} ${TEAL}${url}${RESET}`);
   console.log('');
 
   // Auto-open browser.

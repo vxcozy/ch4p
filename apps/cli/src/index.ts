@@ -28,21 +28,11 @@
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TEAL, RESET, BOLD, DIM, GREEN, RED } from './ui.js';
 
 // Compile-time constant injected by `bun build --compile --define CH4P_VERSION=...`.
 // At runtime in normal Node.js builds this will be `undefined`.
 declare const CH4P_VERSION: string | undefined;
-
-// ---------------------------------------------------------------------------
-// ANSI color helpers
-// ---------------------------------------------------------------------------
-
-const RESET = '\x1b[0m';
-const BOLD = '\x1b[1m';
-const DIM = '\x1b[2m';
-const CYAN = '\x1b[36m';
-const GREEN = '\x1b[32m';
-const RED = '\x1b[31m';
 
 // ---------------------------------------------------------------------------
 // Version
@@ -86,7 +76,7 @@ function printHelp(): void {
   const version = getVersion();
 
   console.log(`
-  ${CYAN}${BOLD}ch4p${RESET} ${DIM}v${version}${RESET} -- Personal AI Assistant
+  ${TEAL}${BOLD}ch4p${RESET} ${DIM}v${version}${RESET} -- Personal AI Assistant
 
   ${BOLD}Usage${RESET}
     ${GREEN}ch4p${RESET}                            Interactive agent mode (REPL)
@@ -130,7 +120,7 @@ function printHelp(): void {
     ${DIM}$${RESET} ch4p canvas                           ${DIM}# Start canvas workspace${RESET}
     ${DIM}$${RESET} ch4p message -c telegram "Hello!"     ${DIM}# Send via channel${RESET}
 
-  ${DIM}Run ${CYAN}ch4p onboard${DIM} to get started.${RESET}
+  ${DIM}Run ${TEAL}ch4p onboard${DIM} to get started.${RESET}
 `);
 }
 
@@ -253,7 +243,7 @@ async function main(): Promise<void> {
 
     default: {
       console.error(`\n  ${RED}Unknown command:${RESET} ${command}`);
-      console.error(`  ${DIM}Run ${CYAN}ch4p --help${DIM} for available commands.${RESET}\n`);
+      console.error(`  ${DIM}Run ${TEAL}ch4p --help${DIM} for available commands.${RESET}\n`);
       process.exitCode = 1;
       break;
     }

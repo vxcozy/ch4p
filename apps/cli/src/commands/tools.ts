@@ -6,18 +6,7 @@
  */
 
 import { ToolRegistry } from '@ch4p/tools';
-
-// ---------------------------------------------------------------------------
-// ANSI color helpers
-// ---------------------------------------------------------------------------
-
-const RESET = '\x1b[0m';
-const BOLD = '\x1b[1m';
-const DIM = '\x1b[2m';
-const CYAN = '\x1b[36m';
-const GREEN = '\x1b[32m';
-const YELLOW = '\x1b[33m';
-const MAGENTA = '\x1b[35m';
+import { TEAL, RESET, BOLD, DIM, GREEN, YELLOW, MAGENTA, box, separator } from '../ui.js';
 
 // ---------------------------------------------------------------------------
 // Display
@@ -37,8 +26,9 @@ export async function tools(): Promise<void> {
   const registry = ToolRegistry.createDefault();
   const allTools = registry.list();
 
-  console.log(`\n  ${CYAN}${BOLD}ch4p Tools${RESET}`);
-  console.log(`  ${DIM}${'='.repeat(50)}${RESET}\n`);
+  console.log(`\n  ${TEAL}${BOLD}ch4p Tools${RESET}`);
+  console.log(separator());
+  console.log('');
 
   // Find the longest tool name for alignment.
   const maxNameLen = Math.max(...allTools.map((t) => t.name.length));
@@ -58,7 +48,7 @@ export async function tools(): Promise<void> {
   const lwCount = allTools.filter((t) => t.weight === 'lightweight').length;
   const hwCount = allTools.filter((t) => t.weight === 'heavyweight').length;
 
-  console.log(`\n  ${DIM}${'='.repeat(50)}${RESET}`);
+  console.log(`\n${separator()}`);
   console.log(
     `  ${allTools.length} tools ` +
     `(${GREEN}${lwCount} lightweight${RESET}, ${YELLOW}${hwCount} heavyweight${RESET})`,

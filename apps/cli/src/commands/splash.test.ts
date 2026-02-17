@@ -51,8 +51,8 @@ describe('splash', () => {
         const allOutput = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
         expect(allOutput).toContain('ch4p');
         expect(allOutput).toContain('personal AI assistant');
-        // Should contain ANSI color codes (CYAN = \x1b[36m).
-        expect(allOutput).toContain('\x1b[36m');
+        // Should contain ANSI color codes (TEAL = \x1b[38;2;0;186;188m).
+        expect(allOutput).toContain('\x1b[38;2;0;186;188m');
       } finally {
         Object.defineProperty(process.stdout, 'isTTY', { value: origIsTTY, configurable: true });
       }

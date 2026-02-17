@@ -194,11 +194,11 @@ corepack pnpm --filter @ch4p/core build
 - ESM-only (all imports use `.js` extension)
 - Zero required external runtime dependencies for core, security, and CLI packages (`playwright-core` is optional for browser tool)
 - `tsup` for bundling, `vitest` for testing, `vite` for web frontend (code-split with lazy loading)
-- 67 test files, 1952 tests
+- 68 test files, 2012 tests
 
 ## Configuration
 
-Configuration lives in `~/.ch4p/config.json`. The onboarding wizard creates it, or you can write it manually:
+Configuration lives in `~/.ch4p/config.json`. The onboarding wizard (`ch4p onboard`) creates it with ~20 configurable categories covering engines, providers, channels, services, and system settings. Each category defaults to skip — pressing Enter through everything produces the same default config. You can also write it manually:
 
 ```json
 {

@@ -18,18 +18,7 @@
 
 import { loadConfig } from '../config.js';
 import { PairingManager } from '@ch4p/gateway';
-
-// ---------------------------------------------------------------------------
-// ANSI color helpers
-// ---------------------------------------------------------------------------
-
-const RESET = '\x1b[0m';
-const BOLD = '\x1b[1m';
-const DIM = '\x1b[2m';
-const CYAN = '\x1b[36m';
-const GREEN = '\x1b[32m';
-const YELLOW = '\x1b[33m';
-const RED = '\x1b[31m';
+import { TEAL, RESET, BOLD, DIM, GREEN, YELLOW, RED, separator } from '../ui.js';
 
 // ---------------------------------------------------------------------------
 // Shared pairing manager instance (local, for CLI-only operations)
@@ -55,7 +44,7 @@ function handleGenerate(args: string[]): void {
   try {
     const code = pm.generateCode(label);
     console.log(`  ${GREEN}${BOLD}Pairing code generated${RESET}\n`);
-    console.log(`  ${BOLD}Code${RESET}      ${CYAN}${BOLD}${code.code}${RESET}`);
+    console.log(`  ${BOLD}Code${RESET}      ${TEAL}${BOLD}${code.code}${RESET}`);
     console.log(`  ${BOLD}Label${RESET}     ${code.label ?? DIM + 'none' + RESET}`);
     console.log(`  ${BOLD}Expires${RESET}   ${code.expiresAt.toLocaleTimeString()}`);
     console.log('');
@@ -80,7 +69,7 @@ function handleList(): void {
     for (const code of codes) {
       const remaining = Math.max(0, Math.ceil((code.expiresAt.getTime() - Date.now()) / 1000));
       console.log(
-        `  ${CYAN}${code.code}${RESET}  ${DIM}label=${code.label ?? 'none'}  ` +
+        `  ${TEAL}${code.code}${RESET}  ${DIM}label=${code.label ?? 'none'}  ` +
         `expires in ${remaining}s${RESET}`,
       );
     }
@@ -153,7 +142,7 @@ export async function pairing(args: string[]): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`\n  ${RED}Failed to load config:${RESET} ${message}`);
-    console.error(`  ${DIM}Run ${CYAN}ch4p onboard${DIM} to set up ch4p.${RESET}\n`);
+    console.error(`  ${DIM}Run ${TEAL}ch4p onboard${DIM} to set up ch4p.${RESET}\n`);
     process.exitCode = 1;
     return;
   }
@@ -161,8 +150,9 @@ export async function pairing(args: string[]): Promise<void> {
   const subcommand = args[0] ?? 'status';
   const subArgs = args.slice(1);
 
-  console.log(`\n  ${CYAN}${BOLD}ch4p Pairing${RESET}`);
-  console.log(`  ${DIM}${'='.repeat(50)}${RESET}\n`);
+  console.log(`\n  ${TEAL}${BOLD}ch4p Pairing${RESET}`);
+  console.log(separator());
+  console.log('');
 
   switch (subcommand) {
     case 'generate':

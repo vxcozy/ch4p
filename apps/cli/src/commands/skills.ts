@@ -11,18 +11,7 @@
 
 import { SkillRegistry } from '@ch4p/skills';
 import { loadConfig } from '../config.js';
-
-// ---------------------------------------------------------------------------
-// ANSI color helpers
-// ---------------------------------------------------------------------------
-
-const RESET = '\x1b[0m';
-const BOLD = '\x1b[1m';
-const DIM = '\x1b[2m';
-const CYAN = '\x1b[36m';
-const GREEN = '\x1b[32m';
-const YELLOW = '\x1b[33m';
-const RED = '\x1b[31m';
+import { TEAL, RESET, BOLD, DIM, GREEN, YELLOW, RED } from '../ui.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -59,7 +48,7 @@ function listSkills(): void {
       skill.source === 'legacy' ? `${YELLOW}[legacy]${RESET}` :
       `${GREEN}[project]${RESET}`;
 
-    console.log(`  ${CYAN}${skill.manifest.name}${RESET} ${sourceTag}`);
+    console.log(`  ${TEAL}${skill.manifest.name}${RESET} ${sourceTag}`);
     console.log(`    ${DIM}${skill.manifest.description}${RESET}`);
     if (skill.manifest.license) {
       console.log(`    ${DIM}License: ${skill.manifest.license}${RESET}`);
@@ -74,7 +63,7 @@ function showSkill(name: string): void {
 
   if (!skill) {
     console.error(`\n  ${RED}Skill not found:${RESET} ${name}`);
-    console.error(`  ${DIM}Run ${CYAN}ch4p skills${DIM} to list available skills.${RESET}\n`);
+    console.error(`  ${DIM}Run ${TEAL}ch4p skills${DIM} to list available skills.${RESET}\n`);
     process.exitCode = 1;
     return;
   }

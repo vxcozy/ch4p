@@ -51,18 +51,7 @@ import type { MemoryConfig } from '@ch4p/memory';
 import { DefaultSecurityPolicy } from '@ch4p/security';
 import { VoiceProcessor, WhisperSTT, DeepgramSTT, ElevenLabsTTS } from '@ch4p/voice';
 import type { VoiceConfig } from '@ch4p/voice';
-
-// ---------------------------------------------------------------------------
-// ANSI color helpers
-// ---------------------------------------------------------------------------
-
-const RESET = '\x1b[0m';
-const BOLD = '\x1b[1m';
-const DIM = '\x1b[2m';
-const CYAN = '\x1b[36m';
-const GREEN = '\x1b[32m';
-const YELLOW = '\x1b[33m';
-const RED = '\x1b[31m';
+import { TEAL, RESET, BOLD, DIM, GREEN, YELLOW, RED, box, kvRow } from '../ui.js';
 
 // ---------------------------------------------------------------------------
 // Channel factory
@@ -172,7 +161,7 @@ export async function gateway(args: string[]): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`\n  ${RED}Failed to load config:${RESET} ${message}`);
-    console.error(`  ${DIM}Run ${CYAN}ch4p onboard${DIM} to set up ch4p.${RESET}\n`);
+    console.error(`  ${DIM}Run ${TEAL}ch4p onboard${DIM} to set up ch4p.${RESET}\n`);
     process.exitCode = 1;
     return;
   }
@@ -317,9 +306,6 @@ export async function gateway(args: string[]): Promise<void> {
   });
 
   // Print startup banner.
-  console.log(`\n  ${CYAN}${BOLD}ch4p Gateway${RESET}`);
-  console.log(`  ${DIM}${'='.repeat(50)}${RESET}\n`);
-
   try {
     await server.start();
   } catch (err) {
@@ -332,12 +318,14 @@ export async function gateway(args: string[]): Promise<void> {
   const addr = server.getAddress();
   const bindDisplay = addr ? `${addr.host}:${addr.port}` : `${host}:${port}`;
 
-  console.log(`  ${GREEN}${BOLD}Server listening${RESET} on ${bindDisplay}`);
-  console.log(`  ${BOLD}Pairing${RESET}       ${requirePairing ? `${GREEN}required${RESET}` : `${YELLOW}disabled${RESET}`}`);
-  console.log(`  ${BOLD}Engine${RESET}        ${engine ? engine.name : `${YELLOW}none (no API key)${RESET}`}`);
-  console.log(`  ${BOLD}Memory${RESET}        ${memoryBackend ? config.memory.backend : `${DIM}disabled${RESET}`}`);
-  console.log(`  ${BOLD}Voice${RESET}         ${voiceProcessor ? `${GREEN}enabled${RESET} (STT: ${voiceCfg?.stt.provider ?? '?'}, TTS: ${voiceCfg?.tts.provider ?? 'none'})` : `${DIM}disabled${RESET}`}`);
-  console.log(`  ${BOLD}Identity${RESET}      ${agentRegistration ? `${GREEN}enabled${RESET} (chain ${config.identity?.chainId ?? 8453})` : `${DIM}disabled${RESET}`}`);
+  console.log('\n' + box('ch4p Gateway', [
+    kvRow('Server', `${GREEN}${BOLD}listening${RESET} on ${bindDisplay}`),
+    kvRow('Pairing', requirePairing ? `${GREEN}required${RESET}` : `${YELLOW}disabled${RESET}`),
+    kvRow('Engine', engine ? engine.name : `${YELLOW}none (no API key)${RESET}`),
+    kvRow('Memory', memoryBackend ? config.memory.backend : `${DIM}disabled${RESET}`),
+    kvRow('Voice', voiceProcessor ? `${GREEN}enabled${RESET} (STT: ${voiceCfg?.stt.provider ?? '?'}, TTS: ${voiceCfg?.tts.provider ?? 'none'})` : `${DIM}disabled${RESET}`),
+    kvRow('Identity', agentRegistration ? `${GREEN}enabled${RESET} (chain ${config.identity?.chainId ?? 8453})` : `${DIM}disabled${RESET}`),
+  ]));
   console.log('');
   console.log(`  ${DIM}Routes:${RESET}`);
   console.log(`  ${DIM}  GET    /health              - liveness probe${RESET}`);
@@ -405,7 +393,7 @@ export async function gateway(args: string[]): Promise<void> {
       };
       const tunnelInfo = await tunnel.start(tunnelCfg);
       console.log(`  ${GREEN}${BOLD}Tunnel active${RESET} ${DIM}(${tunnelProvider})${RESET}`);
-      console.log(`  ${BOLD}Public URL${RESET}    ${CYAN}${tunnelInfo.url}${RESET}`);
+      console.log(`  ${BOLD}Public URL${RESET}    ${TEAL}${tunnelInfo.url}${RESET}`);
       console.log('');
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -463,7 +451,7 @@ export async function gateway(args: string[]): Promise<void> {
 
   if (requirePairing && pairingManager) {
     const code = pairingManager.generateCode('CLI startup');
-    console.log(`  ${BOLD}Initial pairing code:${RESET} ${CYAN}${BOLD}${code.code}${RESET}`);
+    console.log(`  ${BOLD}Initial pairing code:${RESET} ${TEAL}${BOLD}${code.code}${RESET}`);
     console.log(`  ${DIM}Expires in 5 minutes. Use POST /pair to exchange for a token.${RESET}`);
     console.log('');
   }

@@ -13,18 +13,7 @@
 
 import type { Ch4pConfig } from '@ch4p/core';
 import { loadConfig } from '../config.js';
-
-// ---------------------------------------------------------------------------
-// ANSI color helpers
-// ---------------------------------------------------------------------------
-
-const RESET = '\x1b[0m';
-const BOLD = '\x1b[1m';
-const DIM = '\x1b[2m';
-const CYAN = '\x1b[36m';
-const GREEN = '\x1b[32m';
-const YELLOW = '\x1b[33m';
-const RED = '\x1b[31m';
+import { TEAL, RESET, BOLD, DIM, GREEN, YELLOW, RED, separator } from '../ui.js';
 
 // ---------------------------------------------------------------------------
 // Known chain names
@@ -66,8 +55,9 @@ export async function identity(args: string[]): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function identityStatus(): Promise<void> {
-  console.log(`\n  ${CYAN}${BOLD}ch4p Identity${RESET}`);
-  console.log(`  ${DIM}${'='.repeat(50)}${RESET}\n`);
+  console.log(`\n  ${TEAL}${BOLD}ch4p Identity${RESET}`);
+  console.log(separator());
+  console.log('');
 
   let config: Ch4pConfig;
   try {
@@ -75,7 +65,7 @@ async function identityStatus(): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`  ${RED}Failed to load config:${RESET} ${message}`);
-    console.error(`  ${DIM}Run ${CYAN}ch4p onboard${DIM} to set up ch4p.${RESET}\n`);
+    console.error(`  ${DIM}Run ${TEAL}ch4p onboard${DIM} to set up ch4p.${RESET}\n`);
     process.exitCode = 1;
     return;
   }
@@ -165,8 +155,9 @@ async function identityStatus(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function identityRegister(): Promise<void> {
-  console.log(`\n  ${CYAN}${BOLD}ch4p Identity — Register${RESET}`);
-  console.log(`  ${DIM}${'='.repeat(50)}${RESET}\n`);
+  console.log(`\n  ${TEAL}${BOLD}ch4p Identity — Register${RESET}`);
+  console.log(separator());
+  console.log('');
 
   let config: Ch4pConfig;
   try {
@@ -204,7 +195,7 @@ async function identityRegister(): Promise<void> {
 
   if (idConfig.agentId) {
     console.log(`  ${YELLOW}Agent already registered with ID: ${idConfig.agentId}${RESET}`);
-    console.log(`  ${DIM}Run ${CYAN}ch4p identity status${DIM} to see details.${RESET}\n`);
+    console.log(`  ${DIM}Run ${TEAL}ch4p identity status${DIM} to see details.${RESET}\n`);
     return;
   }
 
@@ -239,9 +230,9 @@ async function identityRegister(): Promise<void> {
     }
     console.log('');
     console.log(`  ${DIM}Next steps:${RESET}`);
-    console.log(`  ${DIM}  1. Add ${CYAN}"agentId": "${identity.agentId}"${DIM} to identity config${RESET}`);
-    console.log(`  ${DIM}  2. Run ${CYAN}ch4p gateway${DIM} to serve /.well-known/agent.json${RESET}`);
-    console.log(`  ${DIM}  3. Run ${CYAN}ch4p identity status${DIM} to verify${RESET}`);
+    console.log(`  ${DIM}  1. Add ${TEAL}"agentId": "${identity.agentId}"${DIM} to identity config${RESET}`);
+    console.log(`  ${DIM}  2. Run ${TEAL}ch4p gateway${DIM} to serve /.well-known/agent.json${RESET}`);
+    console.log(`  ${DIM}  3. Run ${TEAL}ch4p identity status${DIM} to verify${RESET}`);
     console.log('');
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
