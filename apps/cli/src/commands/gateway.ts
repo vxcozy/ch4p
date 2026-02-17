@@ -37,6 +37,7 @@ import {
   GoogleChatChannel,
   WebChatChannel,
   IrcChannel,
+  MacOSChannel,
 } from '@ch4p/channels';
 import { createTunnelProvider } from '@ch4p/tunnels';
 import { Session, AgentLoop, ContextManager, FormatVerifier, LLMVerifier, createAutoRecallHook, createAutoSummarizeHook } from '@ch4p/agent';
@@ -49,6 +50,8 @@ import type { ObservabilityConfig } from '@ch4p/observability';
 import { createMemoryBackend } from '@ch4p/memory';
 import type { MemoryConfig } from '@ch4p/memory';
 import { DefaultSecurityPolicy } from '@ch4p/security';
+import { Supervisor } from '@ch4p/supervisor';
+import type { ChildHandle } from '@ch4p/supervisor';
 import { VoiceProcessor, WhisperSTT, DeepgramSTT, ElevenLabsTTS } from '@ch4p/voice';
 import type { VoiceConfig } from '@ch4p/voice';
 import { TEAL, RESET, BOLD, DIM, GREEN, YELLOW, RED, box, kvRow } from '../ui.js';
@@ -92,6 +95,8 @@ function createChannelInstance(channelName: string): IChannel | null {
       return new WebChatChannel();
     case 'irc':
       return new IrcChannel();
+    case 'macos':
+      return new MacOSChannel();
     default:
       return null;
   }
@@ -340,10 +345,23 @@ export async function gateway(args: string[]): Promise<void> {
   console.log(`  ${DIM}  DELETE /sessions/:id        - end a session${RESET}`);
   console.log('');
 
-  // ----- Start channel adapters -----
+  // ----- Start channel adapters (supervised) -----
   const channelRegistry = new ChannelRegistry();
   const startedChannels: IChannel[] = [];
   const channelNames = Object.keys(config.channels);
+
+  // Supervisor wraps channel lifecycles for automatic crash recovery.
+  const channelSupervisor = new Supervisor({ strategy: 'one-for-one', maxRestarts: 5, windowMs: 60_000 });
+
+  channelSupervisor.on('child:crashed', (childId, error) => {
+    console.log(`  ${YELLOW}⚠ Channel ${childId} crashed:${RESET} ${error.message}`);
+  });
+  channelSupervisor.on('child:restarted', (childId, _handle, attempt) => {
+    console.log(`  ${GREEN}✓${RESET} Channel ${childId} restarted ${DIM}(attempt ${attempt})${RESET}`);
+  });
+  channelSupervisor.on('supervisor:max_restarts_exceeded', (childId, count, windowMs) => {
+    console.log(`  ${RED}✗${RESET} Channel ${childId} exceeded max restarts (${count} in ${Math.round(windowMs / 1000)}s)`);
+  });
 
   if (channelNames.length > 0) {
     console.log(`  ${BOLD}Channels:${RESET}`);
@@ -368,12 +386,37 @@ export async function gateway(args: string[]): Promise<void> {
           );
         });
 
+        // Register with supervisor for crash recovery. The channel is already
+        // started, so start() is a no-op reconnect and shutdown() calls stop().
+        let alive = true;
+        await channelSupervisor.addChild({
+          id: channelName,
+          start: async () => {
+            // On restart, re-start the channel with its original config.
+            if (!alive) {
+              await channel.start(channelCfg);
+            }
+            alive = true;
+            return {
+              id: channelName,
+              kill: () => { alive = false; void channel.stop(); },
+              isAlive: () => alive,
+            } satisfies ChildHandle;
+          },
+          shutdown: async () => {
+            alive = false;
+            await channel.stop();
+          },
+        });
+
         console.log(`    ${GREEN}✓${RESET} ${channelName} ${DIM}(${channel.name})${RESET}`);
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.log(`    ${RED}✗${RESET} ${channelName}: ${errMsg}`);
       }
     }
+
+    await channelSupervisor.start();
     console.log('');
   } else {
     console.log(`  ${DIM}No channels configured. Add channels to ~/.ch4p/config.json.${RESET}`);
@@ -392,8 +435,9 @@ export async function gateway(args: string[]): Promise<void> {
         localHost: host,
       };
       const tunnelInfo = await tunnel.start(tunnelCfg);
+      server.setTunnelUrl(tunnelInfo.publicUrl);
       console.log(`  ${GREEN}${BOLD}Tunnel active${RESET} ${DIM}(${tunnelProvider})${RESET}`);
-      console.log(`  ${BOLD}Public URL${RESET}    ${TEAL}${tunnelInfo.url}${RESET}`);
+      console.log(`  ${BOLD}Public URL${RESET}    ${TEAL}${tunnelInfo.publicUrl}${RESET}`);
       console.log('');
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -468,10 +512,10 @@ export async function gateway(args: string[]): Promise<void> {
         scheduler.stop();
       }
 
-      // Stop channels.
-      for (const channel of startedChannels) {
+      // Stop channels via supervisor (handles graceful shutdown).
+      if (channelSupervisor.isRunning) {
         try {
-          await channel.stop();
+          await channelSupervisor.stop();
         } catch {
           // Best-effort stop.
         }
@@ -572,13 +616,14 @@ function handleInboundMessage(
       }
 
       const session = new Session(routeResult.config, { sharedContext });
-      const tools = ToolRegistry.createDefault({
-        // In gateway mode, exclude heavyweight tools for safety.
-        // Browser is excluded by default (resource-intensive persistent process).
-        exclude: config.autonomy.level === 'readonly'
-          ? ['bash', 'file_write', 'file_edit', 'delegate', 'browser']
-          : ['delegate', 'browser'],
-      });
+      // Build exclusion list based on autonomy level and feature flags.
+      const toolExclude = config.autonomy.level === 'readonly'
+        ? ['bash', 'file_write', 'file_edit', 'delegate', 'browser']
+        : ['delegate', 'browser'];
+      if (!config.mesh?.enabled) {
+        toolExclude.push('mesh');
+      }
+      const tools = ToolRegistry.createDefault({ exclude: toolExclude });
 
       // Register load_skill tool when skills are available.
       if (skillRegistry && skillRegistry.size > 0) {

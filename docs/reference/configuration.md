@@ -326,6 +326,25 @@ Web search configuration (Brave Search API).
 
 ---
 
+## tunnel
+
+Tunnel configuration for public URL exposure. The gateway starts the tunnel automatically on startup and exposes the public URL in `GET /health`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `provider` | `string` | `"none"` | Tunnel provider: `"cloudflare"`, `"tailscale"`, `"ngrok"`, or `"none"`. |
+| `authToken` | `string` | `null` | Auth token for ngrok (or `"${NGROK_AUTH_TOKEN}"` for env var). |
+| `subdomain` | `string` | `null` | Custom subdomain (ngrok paid tier only). |
+| `tunnelName` | `string` | `null` | Named tunnel for Cloudflare (omit for Quick Tunnel). |
+| `binaryPath` | `string` | auto-detect | Path to tunnel binary (`cloudflared`, `tailscale`, `ngrok`). |
+| `protocol` | `string` | `"http"` | Cloudflare tunnel protocol: `"http"` or `"https"`. |
+| `https` | `boolean` | `true` | Tailscale: use HTTPS. |
+| `region` | `string` | `null` | ngrok: tunnel region (auto by default). |
+
+If the tunnel fails to start, the gateway continues running locally without public exposure.
+
+---
+
 ## scheduler
 
 Built-in cron scheduler for recurring agent tasks.

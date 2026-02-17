@@ -419,11 +419,18 @@ function createSkillRegistry(config: Ch4pConfig): SkillRegistry {
  * may not be wired, but the tools validate gracefully.
  */
 function createToolRegistry(config: Ch4pConfig, skillRegistry?: SkillRegistry): ToolRegistry {
-  const registry = config.autonomy.level === 'readonly'
-    ? ToolRegistry.createDefault({
-        exclude: ['bash', 'file_write', 'file_edit', 'delegate'],
-      })
-    : ToolRegistry.createDefault();
+  // Build exclusion list based on autonomy level and feature flags.
+  const exclude: string[] = [];
+  if (config.autonomy.level === 'readonly') {
+    exclude.push('bash', 'file_write', 'file_edit', 'delegate');
+  }
+  if (!config.mesh?.enabled) {
+    exclude.push('mesh');
+  }
+
+  const registry = ToolRegistry.createDefault(
+    exclude.length > 0 ? { exclude } : undefined,
+  );
 
   // Register the load_skill tool when skills are available.
   // This enables progressive disclosure: the agent sees skill names in its

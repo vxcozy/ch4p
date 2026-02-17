@@ -66,6 +66,7 @@ export class GatewayServer {
   private readonly onCanvasConnection: ((sessionId: string, bridge: WebSocketBridge) => void) | null;
   private readonly agentRegistration: Record<string, unknown> | null;
   private readonly onWebhook: GatewayServerOptions['onWebhook'] | null;
+  private tunnelUrl: string | null = null;
 
   constructor(options: GatewayServerOptions) {
     this.port = options.port;
@@ -129,6 +130,11 @@ export class GatewayServer {
         else resolve();
       });
     });
+  }
+
+  /** Set the public tunnel URL (shown in GET /health). */
+  setTunnelUrl(url: string | null): void {
+    this.tunnelUrl = url;
   }
 
   /** Get the bound address (useful in tests with port 0). */
@@ -231,6 +237,7 @@ export class GatewayServer {
         sessions: this.sessionManager.listSessions().length,
         canvas: this.canvasSessionManager?.listSessionIds().length ?? 0,
         ...(stats ? { pairing: stats } : {}),
+        ...(this.tunnelUrl ? { tunnel: this.tunnelUrl } : {}),
       });
       return;
     }

@@ -485,9 +485,26 @@ export class AgentLoop {
             // Yield tool_end and add result to context.
             yield { type: 'tool_end', tool: toolCall.name, result };
 
+            // Sanitize tool output before adding to LLM context — prevents
+            // leaked secrets (API keys, tokens, etc.) from reaching the model.
+            const rawContent = result.output || result.error || '';
+            const policy = this.opts.securityPolicy ?? PERMISSIVE_POLICY;
+            const sanitized = policy.sanitizeOutput(rawContent);
+            if (sanitized.redacted) {
+              this.observer.onSecurityEvent({
+                type: 'secret_redacted',
+                details: {
+                  source: 'tool_output',
+                  tool: toolCall.name,
+                  patterns: sanitized.redactedPatterns,
+                },
+                timestamp: new Date(),
+              });
+            }
+
             await this.session.getContext().addMessage({
               role: 'tool',
-              content: result.output || result.error || '',
+              content: sanitized.clean,
               toolCallId: toolCall.id,
             });
 

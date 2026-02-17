@@ -408,6 +408,17 @@ describe('GatewayServer', () => {
       expect(body.timestamp).toBeDefined();
       expect(body.sessions).toBe(0);
     });
+
+    it('should include tunnel URL when set', async () => {
+      server.setTunnelUrl('https://test.trycloudflare.com');
+      const { body } = await fetchJson(baseUrl, '/health');
+      expect(body.tunnel).toBe('https://test.trycloudflare.com');
+    });
+
+    it('should omit tunnel field when not set', async () => {
+      const { body } = await fetchJson(baseUrl, '/health');
+      expect(body.tunnel).toBeUndefined();
+    });
   });
 
   describe('GET /sessions', () => {

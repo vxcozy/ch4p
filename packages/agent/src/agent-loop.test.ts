@@ -26,6 +26,7 @@ import type {
   ITool,
   IObserver,
   IVerifier,
+  ISecurityPolicy,
   ToolResult,
   StateSnapshot,
   VerificationResult,
@@ -1735,6 +1736,154 @@ describe('AgentLoop', () => {
 
       const errorEvents = events.filter((e) => e.type === 'error');
       expect(errorEvents.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  // =========================================================================
+  // 15. Output sanitization on tool results
+  // =========================================================================
+
+  describe('output sanitization on tool results', () => {
+    function createRedactingPolicy(): ISecurityPolicy {
+      return {
+        autonomyLevel: 'supervised',
+        validatePath: () => ({ allowed: true }),
+        validateCommand: () => ({ allowed: true }),
+        requiresConfirmation: () => false,
+        audit: () => [],
+        sanitizeOutput: (text: string) => {
+          // Simulate redacting an API key pattern
+          if (text.includes('sk-')) {
+            return {
+              clean: text.replace(/sk-[A-Za-z0-9]+/g, '[REDACTED]'),
+              redacted: true,
+              redactedPatterns: ['api_key'],
+            };
+          }
+          return { clean: text, redacted: false };
+        },
+        validateInput: () => ({ safe: true, threats: [] }),
+      };
+    }
+
+    it('should sanitize tool output before adding to context', async () => {
+      const tool = createMockTool({
+        execute: vi.fn().mockResolvedValue({
+          success: true,
+          output: 'API key is sk-abc123xyz',
+        }),
+      });
+
+      const engine = createMultiCallEngine([
+        [{ type: 'tool_start', id: 'tc1', tool: 'test_tool', args: {} }],
+        [{ type: 'completed', answer: 'Done' }],
+      ]);
+
+      const session = createSession();
+      const observer = createMockObserver();
+      const loop = new AgentLoop(session, engine, [tool], observer, {
+        securityPolicy: createRedactingPolicy(),
+      });
+
+      await collectEvents(loop, 'Read the config');
+
+      // The context should contain the sanitized output, not the raw key.
+      const messages = session.getContext().getMessages();
+      const toolMessages = messages.filter((m) => m.role === 'tool');
+      expect(toolMessages).toHaveLength(1);
+      expect(toolMessages[0]!.content).toContain('[REDACTED]');
+      expect(toolMessages[0]!.content).not.toContain('sk-abc123xyz');
+    });
+
+    it('should notify observer when tool output is redacted', async () => {
+      const tool = createMockTool({
+        execute: vi.fn().mockResolvedValue({
+          success: true,
+          output: 'Token: sk-secret999',
+        }),
+      });
+
+      const engine = createMultiCallEngine([
+        [{ type: 'tool_start', id: 'tc1', tool: 'test_tool', args: {} }],
+        [{ type: 'completed', answer: 'Done' }],
+      ]);
+
+      const session = createSession();
+      const observer = createMockObserver();
+      const loop = new AgentLoop(session, engine, [tool], observer, {
+        securityPolicy: createRedactingPolicy(),
+      });
+
+      await collectEvents(loop, 'Show secrets');
+
+      expect(observer.onSecurityEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'secret_redacted',
+          details: expect.objectContaining({
+            source: 'tool_output',
+            tool: 'test_tool',
+            patterns: ['api_key'],
+          }),
+        }),
+      );
+    });
+
+    it('should not notify observer when no redaction occurs', async () => {
+      const tool = createMockTool({
+        execute: vi.fn().mockResolvedValue({
+          success: true,
+          output: 'Safe output with no secrets',
+        }),
+      });
+
+      const engine = createMultiCallEngine([
+        [{ type: 'tool_start', id: 'tc1', tool: 'test_tool', args: {} }],
+        [{ type: 'completed', answer: 'Done' }],
+      ]);
+
+      const session = createSession();
+      const observer = createMockObserver();
+      const loop = new AgentLoop(session, engine, [tool], observer, {
+        securityPolicy: createRedactingPolicy(),
+      });
+
+      await collectEvents(loop, 'Clean output');
+
+      // onSecurityEvent should only be called for session lifecycle, not redaction.
+      const securityCalls = (observer.onSecurityEvent as ReturnType<typeof vi.fn>).mock.calls;
+      const redactionCalls = securityCalls.filter(
+        (call) => call[0]?.type === 'secret_redacted',
+      );
+      expect(redactionCalls).toHaveLength(0);
+    });
+
+    it('should sanitize error output from failed tools', async () => {
+      const tool = createMockTool({
+        execute: vi.fn().mockResolvedValue({
+          success: false,
+          output: '',
+          error: 'Connection failed with token sk-leaked456',
+        }),
+      });
+
+      const engine = createMultiCallEngine([
+        [{ type: 'tool_start', id: 'tc1', tool: 'test_tool', args: {} }],
+        [{ type: 'completed', answer: 'Recovered' }],
+      ]);
+
+      const session = createSession();
+      const observer = createMockObserver();
+      const loop = new AgentLoop(session, engine, [tool], observer, {
+        securityPolicy: createRedactingPolicy(),
+      });
+
+      await collectEvents(loop, 'Failing tool with secret');
+
+      const messages = session.getContext().getMessages();
+      const toolMessages = messages.filter((m) => m.role === 'tool');
+      expect(toolMessages).toHaveLength(1);
+      expect(toolMessages[0]!.content).not.toContain('sk-leaked456');
+      expect(toolMessages[0]!.content).toContain('[REDACTED]');
     });
   });
 });
