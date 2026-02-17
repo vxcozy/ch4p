@@ -244,6 +244,12 @@ export const CHANNEL_DEFS: ChannelDef[] = [
     ],
     notes: 'Requires your own Zalo automation bridge (e.g. zca-js). May violate Zalo TOS.',
   },
+  {
+    id: 'macos',
+    label: 'macOS Native',
+    fields: [],
+    notes: 'macOS only. Uses Notification Center + AppleScript dialogs — no additional config needed.',
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -582,6 +588,55 @@ async function configureCron(
   console.log(`  ${GREEN}Cron scheduler and webhooks are available via the gateway.${RESET}`);
   console.log(`  ${DIM}Configure jobs in ~/.ch4p/config.json under "cron.jobs".${RESET}`);
   console.log(`  ${DIM}See docs/how-to/use-cron-webhooks.md for details.${RESET}\n`);
+}
+
+async function configureVoiceWake(
+  rl: readline.Interface,
+  config: ReturnType<typeof getDefaultConfig>,
+): Promise<void> {
+  if (!(await askYesNo(rl, 'Enable always-on voice wake (hot-mic listening)?'))) return;
+
+  console.log(`  ${DIM}Requires SoX (rec) — macOS: brew install sox, Linux: apt install sox${RESET}`);
+
+  let wakeWord: string | undefined;
+  const useWakeWord = await askYesNo(rl, 'Use a wake word (e.g. "hey chappie")?');
+  if (useWakeWord) {
+    wakeWord = await ask(rl, `  ${TEAL}> Wake word: ${RESET}`) || undefined;
+  }
+
+  const thresholdStr = await ask(rl, `  ${TEAL}> Energy threshold [500]: ${RESET}`);
+  const energyThreshold = thresholdStr ? parseInt(thresholdStr, 10) : undefined;
+
+  // Merge wake config into existing voice config.
+  const voiceConfig = (config as Record<string, unknown>).voice as Record<string, unknown> | undefined;
+  const wake: Record<string, unknown> = { enabled: true };
+  if (wakeWord) wake.wakeWord = wakeWord;
+  if (energyThreshold && !isNaN(energyThreshold)) wake.energyThreshold = energyThreshold;
+
+  if (voiceConfig) {
+    voiceConfig.wake = wake;
+  } else {
+    (config as Record<string, unknown>).voice = { enabled: false, wake };
+  }
+  console.log(`  ${GREEN}Voice wake enabled${wakeWord ? ` (wake word: "${wakeWord}")` : ' (push-to-talk style)'}.${RESET}\n`);
+}
+
+async function configureMesh(
+  rl: readline.Interface,
+  config: ReturnType<typeof getDefaultConfig>,
+): Promise<void> {
+  if (!(await askYesNo(rl, 'Enable mesh orchestration (multi-agent swarm)?'))) return;
+
+  const concurrencyStr = await ask(rl, `  ${TEAL}> Max concurrent sub-agents [3]: ${RESET}`);
+  const maxConcurrency = concurrencyStr ? parseInt(concurrencyStr, 10) : 3;
+
+  (config as Record<string, unknown>).mesh = {
+    enabled: true,
+    maxConcurrency: (!isNaN(maxConcurrency) && maxConcurrency >= 1 && maxConcurrency <= 10)
+      ? maxConcurrency : 3,
+    defaultTimeout: 120000,
+  };
+  console.log(`  ${GREEN}Mesh orchestration enabled (max ${maxConcurrency} concurrent agents).${RESET}\n`);
 }
 
 async function configureMemory(
@@ -944,6 +999,8 @@ export async function onboard(): Promise<void> {
       await configureSearch(rl, config);
       await configureBrowser(rl, config);
       await configureVoice(rl, config);
+      await configureVoiceWake(rl, config);
+      await configureMesh(rl, config);
       await configureMcp(rl, config);
       await configureCron(rl, config);
 

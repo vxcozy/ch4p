@@ -124,6 +124,16 @@ export interface Ch4pConfig {
       apiKey?: string;
       voiceId?: string;
     };
+    wake?: {
+      /** Enable always-on voice wake listening. Default: false. */
+      enabled: boolean;
+      /** Optional wake word (e.g. "hey chappie"). Omit for push-to-talk style. */
+      wakeWord?: string;
+      /** VAD energy threshold for speech detection (default: 500). */
+      energyThreshold?: number;
+      /** Duration of silence (ms) before ending speech (default: 800). */
+      silenceDurationMs?: number;
+    };
   };
   canvas?: {
     enabled: boolean;
@@ -171,6 +181,15 @@ export interface Ch4pConfig {
     semantic: boolean;
     /** Maximum allowed tool error ratio (0-1). Default: 0.5. */
     maxToolErrorRatio?: number;
+  };
+  /** Mesh orchestration (swarm-style multi-agent delegation). */
+  mesh?: {
+    /** Enable mesh tool for parallel multi-agent tasks. Default: false. */
+    enabled: boolean;
+    /** Maximum concurrent sub-agents (default: 3). */
+    maxConcurrency?: number;
+    /** Default timeout per task in ms (default: 120000). */
+    defaultTimeout?: number;
   };
   /** Web search configuration (Brave Search API). */
   search?: {

@@ -225,8 +225,8 @@ describe('parseMultiSelect', () => {
 // ---------------------------------------------------------------------------
 
 describe('CHANNEL_DEFS', () => {
-  it('has 14 channel definitions', () => {
-    expect(CHANNEL_DEFS).toHaveLength(14);
+  it('has 15 channel definitions', () => {
+    expect(CHANNEL_DEFS).toHaveLength(15);
   });
 
   it('all entries have required fields', () => {

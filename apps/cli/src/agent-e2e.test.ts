@@ -285,9 +285,9 @@ describe('Agent E2E Pipeline', () => {
   });
 
   describe('full tool registry integration', () => {
-    it('should create default registry with all 12 tools', () => {
+    it('should create default registry with all 13 tools', () => {
       const registry = ToolRegistry.createDefault();
-      expect(registry.size).toBe(12);
+      expect(registry.size).toBe(13);
       expect(registry.names()).toContain('bash');
       expect(registry.names()).toContain('file_read');
       expect(registry.names()).toContain('file_write');
@@ -300,13 +300,14 @@ describe('Agent E2E Pipeline', () => {
       expect(registry.names()).toContain('memory_recall');
       expect(registry.names()).toContain('delegate');
       expect(registry.names()).toContain('browser');
+      expect(registry.names()).toContain('mesh');
     });
 
     it('should exclude tools in readonly mode', () => {
       const registry = ToolRegistry.createDefault({
         exclude: ['bash', 'file_write', 'file_edit', 'delegate'],
       });
-      expect(registry.size).toBe(8);
+      expect(registry.size).toBe(9);
       expect(registry.names()).not.toContain('bash');
       expect(registry.names()).not.toContain('file_write');
       expect(registry.names()).not.toContain('file_edit');

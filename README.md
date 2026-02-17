@@ -6,7 +6,7 @@ Personal AI assistant platform. Security-first, multi-channel, programmable.
 
 Built on four pillars:
 
-- **Broad connectivity** — 15 messaging channels, tunnel exposure, and a skills system. Compatible with OpenClaw channel adapters, skills, and plugins.
+- **Broad connectivity** — 16 messaging channels, tunnel exposure, and a skills system. Compatible with OpenClaw channel adapters, skills, and plugins.
 - **Resilient concurrency** — OTP-style supervision trees, process isolation, backpressure, and live steering for long-running agent sessions.
 - **Security-first defaults** — trait-based architecture where every defense layer is on by default, hybrid memory search, and encrypted secrets at rest.
 - **Agent reliability** — mandatory tool call validation, state snapshots with diff-based verification, and LLM-as-a-judge outcome assessment. Inspired by the [Agent World Model](https://arxiv.org/abs/2602.10090) research.
@@ -87,16 +87,16 @@ packages/
   agent/          # Agent runtime: session, context, steering, worker pool
   providers/      # LLM providers: Anthropic, OpenAI, Google, OpenRouter, Ollama, Bedrock
   engines/        # Execution engines: native (LLM), echo (testing), subprocess (CLI wrappers)
-  channels/       # Messaging: CLI, Telegram, Discord, Slack, Matrix, WhatsApp, Signal, iMessage, Teams, Zalo, IRC, BlueBubbles, Google Chat, WebChat, Zalo Personal
+  channels/       # Messaging: CLI, Telegram, Discord, Slack, Matrix, WhatsApp, Signal, iMessage, Teams, Zalo, IRC, BlueBubbles, Google Chat, WebChat, Zalo Personal, macOS Native
   canvas/         # A2UI components, canvas state, WS protocol, CanvasTool, CanvasChannel
   gateway/        # HTTP server, session routing, WebSocket bridge, pairing, stream handler, cron scheduler, webhooks
-  tools/          # Built-in tools: bash, file ops, grep, glob, web fetch, web search, browser, memory, delegate, MCP client
+  tools/          # Built-in tools: bash, file ops, grep, glob, web fetch, web search, browser, memory, delegate, mesh, MCP client
   memory/         # Hybrid search: SQLite FTS5 + vector embeddings
   security/       # Filesystem scope, command allowlist, secrets, I/O sanitization
   supervisor/     # OTP-style supervision trees, health monitoring
   observability/  # Console, file, multi-observer logging
   skills/         # Skill discovery, YAML frontmatter parsing, registry (OpenClaw compatible)
-  voice/          # Voice pipeline: STT (Whisper, Deepgram), TTS (ElevenLabs)
+  voice/          # Voice pipeline: STT (Whisper, Deepgram), TTS (ElevenLabs), always-on voice wake
   tunnels/        # Tunnel providers: Cloudflare, Tailscale, ngrok
 apps/
   cli/            # Command-line interface (standalone binary via bun compile)
@@ -154,6 +154,8 @@ Inspired by the Agent World Model research, ch4p implements several techniques f
 - **Named context strategies** — configurable truncation strategies with tunable parameters: compaction targets, keep ratios, tool-call pair preservation, and task description pinning.
 - **MCP tool connectivity** — the built-in MCP client tool connects to any Model Context Protocol server, discovering and proxying tools via `list_tools` + `call_tool`.
 - **Browser control** — Playwright-based browser tool for page navigation, clicking, typing, screenshots, and JS evaluation with SSRF protection.
+- **Mesh orchestration** — swarm-style multi-agent delegation: spawn parallel sub-agents across engines, bounded concurrency, partial failure tolerance.
+- **Voice wake** — opt-in always-on microphone listening with energy-based VAD, wake word filtering, and STT transcription into the agent loop.
 
 ## Memory
 
@@ -237,7 +239,7 @@ See [Alternative LLM Setups](docs/how-to/alternative-llm-setups.md) for configur
 Full Diataxis-style documentation in [`docs/`](docs/index.md):
 
 - **[Tutorials](docs/tutorials/)** — [getting-started](docs/tutorials/getting-started.md), [first-channel](docs/tutorials/first-channel.md)
-- **[How-to Guides](docs/how-to/)** — [add-tool](docs/how-to/add-tool.md), [add-channel](docs/how-to/add-channel.md), [add-provider](docs/how-to/add-provider.md), [add-verifier](docs/how-to/add-verifier.md), [configure-security](docs/how-to/configure-security.md), [deploy-gateway](docs/how-to/deploy-gateway.md), [use-memory](docs/how-to/use-memory.md), [use-canvas](docs/how-to/use-canvas.md), [use-web-search](docs/how-to/use-web-search.md), [use-browser](docs/how-to/use-browser.md), [use-skills](docs/how-to/use-skills.md), [use-mcp](docs/how-to/use-mcp.md), [use-cron-webhooks](docs/how-to/use-cron-webhooks.md), [setup-voice](docs/how-to/setup-voice.md), [use-observability](docs/how-to/use-observability.md), [alternative-llm-setups](docs/how-to/alternative-llm-setups.md)
+- **[How-to Guides](docs/how-to/)** — [add-tool](docs/how-to/add-tool.md), [add-channel](docs/how-to/add-channel.md), [add-provider](docs/how-to/add-provider.md), [add-verifier](docs/how-to/add-verifier.md), [configure-security](docs/how-to/configure-security.md), [deploy-gateway](docs/how-to/deploy-gateway.md), [use-memory](docs/how-to/use-memory.md), [use-canvas](docs/how-to/use-canvas.md), [use-web-search](docs/how-to/use-web-search.md), [use-browser](docs/how-to/use-browser.md), [use-skills](docs/how-to/use-skills.md), [use-mcp](docs/how-to/use-mcp.md), [use-cron-webhooks](docs/how-to/use-cron-webhooks.md), [setup-voice](docs/how-to/setup-voice.md), [use-observability](docs/how-to/use-observability.md), [alternative-llm-setups](docs/how-to/alternative-llm-setups.md), [use-mesh](docs/how-to/use-mesh.md)
 - **[Reference](docs/reference/)** — [interfaces](docs/reference/interfaces.md), [configuration](docs/reference/configuration.md), [CLI](docs/reference/cli.md), [security](docs/reference/security.md)
 - **[Explanation](docs/explanation/)** — [architecture](docs/explanation/architecture.md), [concurrency](docs/explanation/concurrency.md), [security-model](docs/explanation/security-model.md), [memory](docs/explanation/memory.md)
 

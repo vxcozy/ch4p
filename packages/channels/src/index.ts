@@ -31,6 +31,8 @@ export { WebChatChannel } from './webchat.js';
 export type { WebChatConfig } from './webchat.js';
 export { IrcChannel } from './irc.js';
 export type { IrcConfig } from './irc.js';
+export { MacOSChannel } from './macos.js';
+export type { MacOSConfig } from './macos.js';
 
 // Re-export channel-related types from core for convenience
 export type {

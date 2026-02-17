@@ -29,4 +29,14 @@ export interface VoiceConfig {
     apiKey?: string;
     voiceId?: string;
   };
+  wake?: {
+    /** Enable always-on voice wake listening. Default: false. */
+    enabled: boolean;
+    /** Optional wake word (e.g. "hey chappie"). Omit for push-to-talk style. */
+    wakeWord?: string;
+    /** VAD energy threshold for speech detection (default: 500). */
+    energyThreshold?: number;
+    /** Duration of silence (ms) before ending speech (default: 800). */
+    silenceDurationMs?: number;
+  };
 }

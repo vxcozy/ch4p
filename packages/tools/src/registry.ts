@@ -19,6 +19,7 @@ import { WebSearchTool } from './web-search.js';
 import { MemoryStoreTool } from './memory-store.js';
 import { MemoryRecallTool } from './memory-recall.js';
 import { DelegateTool } from './delegate.js';
+import { MeshTool } from './mesh.js';
 import { BrowserTool } from './browser.js';
 
 export class ToolRegistry {
@@ -126,6 +127,7 @@ export class ToolRegistry {
       new MemoryStoreTool(),
       new MemoryRecallTool(),
       new DelegateTool(),
+      new MeshTool(),
       new BrowserTool(),
     ];
 

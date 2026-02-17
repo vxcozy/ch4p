@@ -118,6 +118,11 @@ export function getDefaultConfig(): Ch4pConfig {
       enabled: true,
       semantic: true,
     },
+    mesh: {
+      enabled: false,
+      maxConcurrency: 3,
+      defaultTimeout: 120000,
+    },
   };
 }
 

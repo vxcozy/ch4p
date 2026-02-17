@@ -1,6 +1,6 @@
 # ch4p Documentation
 
-ch4p is a personal AI assistant platform. A play on "chap" — slang for friend — ch4p gives you a programmable, security-first AI agent that speaks across 15 messaging channels.
+ch4p is a personal AI assistant platform. A play on "chap" — slang for friend — ch4p gives you a programmable, security-first AI agent that speaks across 16 messaging channels.
 
 Built in TypeScript on Node.js, ch4p combines BEAM-inspired concurrency, a zero-dependency hybrid memory system, multi-engine LLM architecture, and 10 trait interfaces that make every component replaceable.
 
@@ -49,6 +49,7 @@ Practical recipes for specific tasks. Assumes you already understand the basics.
 - [Set Up Voice](how-to/setup-voice.md) — Configure STT (Whisper, Deepgram) and TTS (ElevenLabs)
 - [Use Observability](how-to/use-observability.md) — Logging, monitoring, and debugging
 - [Alternative LLM Setups](how-to/alternative-llm-setups.md) — Ollama, LiteLLM proxy, CLI passthrough
+- [Use Mesh Orchestration](how-to/use-mesh.md) — Swarm-style multi-agent delegation across engines
 
 ### Reference — Information-Oriented
 
@@ -75,7 +76,7 @@ The reasoning behind ch4p's design. Read when you want to understand "why."
 | Aspect | Detail |
 |---|---|
 | Language | TypeScript (Node.js) |
-| Channels | 15 (Telegram, Discord, Slack, Matrix, IRC, Google Chat, BlueBubbles, WebChat, and more) + interactive canvas |
+| Channels | 16 (Telegram, Discord, Slack, Matrix, IRC, Google Chat, BlueBubbles, WebChat, and more) + interactive canvas |
 | LLM Providers | 6 built-in (Anthropic, OpenAI, Google/Gemini, OpenRouter, Ollama, Bedrock) |
 | Memory | SQLite with FTS5 + vector hybrid search |
 | Concurrency | BEAM-inspired supervision trees with worker threads |

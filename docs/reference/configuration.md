@@ -257,6 +257,17 @@ Zalo Personal Account via lightweight REST bridge. **Warning:** Uses an unoffici
 
 The user must run their own Zalo automation bridge (e.g., via zca-js). ch4p communicates with the bridge via REST. A TOS warning is logged on startup.
 
+### channels.macos
+
+macOS Native channel via Notification Center and AppleScript dialogs. macOS only.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `mode` | `string` | `"dialog"` | Input mode: `"dialog"` (polling AppleScript dialog) or `"notification"` (click-to-reply). |
+| `dialogDelay` | `number` | `1000` | Delay in ms before showing next input dialog. |
+| `title` | `string` | `"ch4p"` | Notification title. |
+| `sound` | `string` | `"Submarine"` | Notification sound name. |
+
 ---
 
 ## verification
@@ -268,6 +279,35 @@ Hybrid task-level verification (AWM-inspired). Both format and semantic checks a
 | `enabled` | `boolean` | `true` | Enable task-level verification. |
 | `semantic` | `boolean` | `true` | Enable LLM-based semantic verification on top of format checks. |
 | `maxToolErrorRatio` | `number` | `0.5` | Maximum allowed ratio of failed tool calls before flagging. |
+
+---
+
+## voice.wake
+
+Always-on voice wake configuration. Opt-in only — disabled by default.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Enable always-on microphone listening. |
+| `wakeWord` | `string` | `null` | Optional wake word (e.g., `"hey chappie"`). Omit for push-to-talk style. |
+| `energyThreshold` | `number` | `500` | VAD energy threshold — lower values = more sensitive. |
+| `silenceDurationMs` | `number` | `800` | Silence duration in ms before end-of-speech detection. |
+
+Requires SoX (`rec` command) for microphone capture. On macOS: `brew install sox`. On Linux: `apt install sox`.
+
+---
+
+## mesh
+
+Mesh orchestration (swarm-style multi-agent delegation). Opt-in — disabled by default.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Enable mesh orchestration tool. |
+| `maxConcurrency` | `number` | `3` | Maximum parallel sub-agents (1-10). |
+| `defaultTimeout` | `number` | `120000` | Per-task timeout in ms. |
+
+When enabled, the `mesh` tool allows the agent to spawn multiple sub-agents in parallel across different engines/models, collecting results as a structured aggregate.
 
 ---
 
