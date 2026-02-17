@@ -1,6 +1,6 @@
 # ch4p Documentation
 
-ch4p is a personal AI assistant platform. A play on "chap" — slang for friend — ch4p gives you a programmable, security-first AI agent that speaks across 14+ messaging channels.
+ch4p is a personal AI assistant platform. A play on "chap" — slang for friend — ch4p gives you a programmable, security-first AI agent that speaks across 15 messaging channels.
 
 Built in TypeScript on Node.js, ch4p combines BEAM-inspired concurrency, a zero-dependency hybrid memory system, multi-engine LLM architecture, and 10 trait interfaces that make every component replaceable.
 

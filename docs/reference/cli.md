@@ -28,8 +28,6 @@ ch4p agent [flags]
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--onboard` | `boolean` | `false` | Run the onboarding wizard. |
-| `--edit-config` | `boolean` | `false` | Open config file in `$EDITOR`. |
 | `--provider` | `string` | from config | Override the LLM provider. |
 | `--model` | `string` | from config | Override the model. |
 | `--autonomy` | `string` | from config | Override autonomy level. |
@@ -43,6 +41,31 @@ ch4p agent --provider ollama --model llama3 --autonomy supervised
 ```
 
 **Output:** Interactive prompt with `<agent-name>` prefix.
+
+---
+
+## ch4p onboard
+
+Run the interactive setup wizard to create or update `~/.ch4p/config.json`.
+
+```
+ch4p onboard
+```
+
+The wizard adapts to your environment. If CLI engines (Claude Code, Codex, Ollama) are detected on your PATH, it offers them as alternatives to API key setup. The core steps are:
+
+1. **Engine setup** — choose between detected CLI engines or API key setup
+2. **API keys** — Anthropic and OpenAI keys (skipped for CLI engine users)
+3. **Preferred model** — pick from available models (skipped for CLI engine users)
+4. **Autonomy level** — read-only, supervised, or full
+5. **Additional features** — ~20 individually skippable categories in 4 groups:
+   - **Providers** — Google/Gemini, OpenRouter, AWS Bedrock
+   - **Channels** — multi-select from 14 messaging channels with per-channel config
+   - **Services** — web search, browser, voice STT/TTS, MCP servers, cron jobs
+   - **System** — memory, verification, gateway, security, commands, tunnel, canvas, observability, skills
+6. **Save** — writes config and runs a security audit
+
+Every category defaults to skip. Pressing Enter through everything produces the same default configuration.
 
 ---
 
@@ -129,19 +152,20 @@ ch4p doctor --provider anthropic
 **Output:**
 
 ```
-ch4p Doctor
-============
-[PASS] Config file valid
-[PASS] Node.js version: v20.11.0
-[PASS] Provider "anthropic" connected
-[PASS] Model "claude-sonnet-4-20250514" available
-[PASS] Tool calling supported
-[PASS] Streaming supported
-[PASS] Memory database accessible
-[PASS] FTS index healthy
-[PASS] Vector index healthy
+  ch4p Doctor
+  ────────────────────────────────────────────────────
 
-All checks passed.
+  + Node.js version      Node.js v22.x detected.
+  + Config file          Valid config at ~/.ch4p/config.json
+  + Data directory       Exists at ~/.ch4p
+  + Memory database      Data directory accessible.
+  + API keys             Anthropic API key configured.
+  + Security audit       All 10 checks passed.
+
+  ────────────────────────────────────────────────────
+  OK 6  WARN 0  FAIL 0  (6 checks)
+
+  All checks passed. ch4p is healthy.
 ```
 
 ---
@@ -168,15 +192,23 @@ ch4p status --memory
 **Output:**
 
 ```
-Agent: running (pid 12345)
-Gateway: running (pid 12346)
-Channels:
-  telegram  connected  latency=45ms   queue=0
-  discord   connected  latency=89ms   queue=2
-Memory:
-  Entries: 247
-  Size: 3.2 MB
-  Health: OK
+  ch4p Status
+  ────────────────────────────────────────────────────
+
+  Version        0.1.0
+  Config         ~/.ch4p/config.json
+  Data dir       ~/.ch4p
+  Provider       anthropic
+  Model          claude-sonnet-4-20250514
+  Engine         native
+  Autonomy       supervised
+  Memory         sqlite (auto-save: on)
+  Gateway        port 18789 (pairing: required)
+  Channels       telegram, discord
+  Tunnel         disabled
+  Observers      console
+  Secrets        encrypted
+  API Keys       anthropic configured
 ```
 
 ---
@@ -205,15 +237,30 @@ ch4p tools
 **Output:**
 
 ```
-Available tools:
-  file.read       Read file contents           [read]
-  file.write      Write file contents          [write]
-  file.list       List directory contents      [read]
-  command.run     Execute shell command         [system]
-  memory.store    Store a memory               [write]
-  memory.recall   Search memories              [read]
-  memory.forget   Delete memories              [write]
-  web.search      Search the web               [read]
+  ch4p Tools
+  ────────────────────────────────────────────────────
+
+  bash            Execute a shell command...
+                  weight: heavyweight
+  file_read       Read the contents of a file...
+                  weight: lightweight
+  file_write      Write content to a file...
+                  weight: lightweight
+  file_edit       Perform exact string replacements...
+                  weight: lightweight
+  grep            Search file contents using regex...
+                  weight: lightweight
+  glob            Find files matching a glob pattern...
+                  weight: lightweight
+  web_fetch       Fetch content from a URL...
+                  weight: heavyweight
+  memory_store    Store content in persistent memory...
+                  weight: lightweight
+  memory_recall   Query persistent memory...
+                  weight: lightweight
+
+  ────────────────────────────────────────────────────
+  12 tools (7 lightweight, 5 heavyweight)
 ```
 
 ---
@@ -303,23 +350,23 @@ ch4p canvas --no-open       # don't auto-open browser
 **Output:**
 
 ```
-ch4p Canvas
-==================================================
+  ch4p Canvas
+  ────────────────────────────────────────────────────
 
-Server listening on 127.0.0.1:4800
-Session       a1b2c3d4e5f6g7h8
-Engine        native
-Static dir    /path/to/apps/web/dist
+  Server listening on 127.0.0.1:4800
+  Session       a1b2c3d4e5f6g7h8
+  Engine        native
+  Static dir    /path/to/apps/web/dist
 
-Routes:
-  WS     /ws/:sessionId       - WebSocket canvas connection
-  GET    /health               - liveness probe
-  GET    /*                    - static files (web UI)
+  Routes:
+    WS     /ws/:sessionId       - WebSocket canvas connection
+    GET    /health               - liveness probe
+    GET    /*                    - static files (web UI)
 
-Canvas URL: http://127.0.0.1:4800/?session=a1b2c3d4e5f6g7h8
+  Canvas URL: http://127.0.0.1:4800/?session=a1b2c3d4e5f6g7h8
 
-Browser opened.
-Press Ctrl+C to stop.
+  Browser opened.
+  Press Ctrl+C to stop.
 ```
 
 The canvas provides:

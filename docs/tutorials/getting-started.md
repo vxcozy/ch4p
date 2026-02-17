@@ -42,31 +42,50 @@ The onboard wizard creates your configuration file and sets up defaults.
 node apps/cli/dist/index.js onboard
 ```
 
-You'll see the ch4p ASCII banner, then the wizard walks you through five steps:
+You'll see the ch4p welcome banner, then the wizard walks you through setup. The number of steps varies depending on your environment — if the wizard detects CLI engines like Claude Code, Codex, or Ollama on your PATH, it offers them as options alongside API key setup.
+
+**Quickest path** — press Enter through everything:
 
 ```
-Step 1/5  Anthropic API Key
-> API key: ********
+  Let's get you set up. Press Enter to skip any step.
 
-Step 2/5  OpenAI API Key (optional)
-> API key: (press Enter to skip)
+  Step 1/6  Anthropic API Key
+  > API key: ********
 
-Step 3/5  Preferred Model
-1. Claude Sonnet 4 (recommended)
-2. Claude Opus 4
-3. GPT-4o
-4. GPT-4o Mini
-> Choice [1]:
+  Step 2/6  OpenAI API Key (optional)
+  > API key: (press Enter to skip)
 
-Step 4/5  Autonomy Level
-1. Read-only
-2. Supervised (recommended)
-3. Full
-> Choice [2]:
+  Step 3/6  Preferred Model
+  1. Claude Sonnet 4 (default)
+  2. Claude Opus 4
+  3. GPT-4o
+  4. GPT-4o Mini
+  > Choice [1]:
 
-Step 5/5  Saving configuration
-Config written to ~/.ch4p/config.json
+  Step 4/6  Autonomy Level
+  1. Read-only
+  2. Supervised (default)
+  3. Full
+  > Choice [2]:
+
+  Step 5/6  Additional Features
+  Configure providers, channels, services, and system settings.
+  Each category can be skipped individually.
+
+  Configure additional features? [y/N]:
+
+  Step 6/6  Saving configuration
+  Config written to ~/.ch4p/config.json
 ```
+
+**If you answer Yes** to "Additional Features," the wizard expands into ~20 individually skippable categories organized into four groups:
+
+- **Providers** — Google/Gemini, OpenRouter, AWS Bedrock API keys
+- **Channels** — multi-select from 14 messaging channels (Telegram, Discord, Slack, Matrix, Teams, WhatsApp, Signal, iMessage, IRC, Zalo OA, BlueBubbles, Google Chat, WebChat, Zalo Personal) with per-channel token prompts
+- **Services** — web search (Brave API), browser (Playwright), voice STT/TTS, MCP servers, cron jobs
+- **System** — memory backend, verification, gateway port, security, allowed commands, tunnel, canvas, observability, skills
+
+Every category defaults to skip — pressing Enter through everything produces the same default config as declining. You can always edit `~/.ch4p/config.json` later.
 
 When the wizard finishes, it runs a security audit and then plays a Chappie boot-up animation — your robot assistant waking up for the first time.
 
@@ -144,7 +163,7 @@ Type `/exit` or press `Ctrl+C`:
 ## What You Learned
 
 1. **Install** — ch4p is a pnpm monorepo built with `corepack pnpm -r build`.
-2. **Onboard** — The wizard creates `~/.ch4p/config.json` with sensible defaults.
+2. **Onboard** — The wizard creates `~/.ch4p/config.json` with ~20 configurable categories, all defaulting to sensible values.
 3. **Agent** — `ch4p agent` starts an interactive agent session with the Chappie splash.
 4. **Messaging** — You send messages at the `>` prompt and get LLM-powered responses.
 5. **Tools** — The agent can use tools (like file read) to interact with your system.
