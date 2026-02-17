@@ -210,6 +210,11 @@ export class ToolWorkerPool extends EventEmitter {
     this.workers = [];
   }
 
+  /** Check whether a real worker script is configured (not the default stub). */
+  hasWorkerScript(): boolean {
+    return this.workerScript !== undefined;
+  }
+
   /** Return current pool statistics. */
   getStats(): PoolStats {
     const activeWorkers = this.workers.filter((w) => w.busy).length;

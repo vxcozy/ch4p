@@ -774,8 +774,8 @@ export class AgentLoop {
     let result: ToolResult;
 
     try {
-      if (tool.weight === 'heavyweight') {
-        // Dispatch to worker pool.
+      if (tool.weight === 'heavyweight' && this.opts.workerPool?.hasWorkerScript?.()) {
+        // Dispatch to worker pool (only when a real worker script is configured).
         result = await this.workerPool.execute(
           {
             tool: toolCall.name,
@@ -792,7 +792,8 @@ export class AgentLoop {
           },
         );
       } else {
-        // Lightweight — run on main thread.
+        // Lightweight tools — or heavyweight tools without a worker script —
+        // run on the main thread.
         result = await tool.execute(toolCall.args, toolContext);
       }
     } catch (err) {
