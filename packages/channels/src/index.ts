@@ -17,6 +17,10 @@ export { SignalChannel } from './signal.js';
 export type { SignalConfig } from './signal.js';
 export { IMessageChannel } from './imessage.js';
 export type { IMessageConfig } from './imessage.js';
+export { TeamsChannel } from './teams.js';
+export type { TeamsConfig } from './teams.js';
+export { ZaloChannel } from './zalo.js';
+export type { ZaloConfig } from './zalo.js';
 
 // Re-export channel-related types from core for convenience
 export type {

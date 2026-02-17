@@ -1,10 +1,18 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useCanvasState } from './hooks/useCanvasState';
-import { CanvasEditor } from './canvas/CanvasEditor';
-import { ChatPanel } from './chat/ChatPanel';
 import type { S2CMessage } from '@ch4p/canvas';
 import './styles/globals.css';
+
+// Lazy-load heavyweight components to reduce initial bundle size.
+// CanvasEditor pulls in tldraw (~500KB gzipped); ChatPanel is lighter
+// but still benefits from code-splitting.
+const CanvasEditor = lazy(() =>
+  import('./canvas/CanvasEditor').then((m) => ({ default: m.CanvasEditor })),
+);
+const ChatPanel = lazy(() =>
+  import('./chat/ChatPanel').then((m) => ({ default: m.ChatPanel })),
+);
 
 /** Extract session ID from URL params or use a default. */
 function getSessionId(): string {
@@ -73,30 +81,34 @@ export function App() {
   return (
     <div className="app-layout">
       <div className="canvas-area">
-        <CanvasEditor
-          nodes={canvasState.nodes}
-          connections={canvasState.connections}
-          onDrag={(componentId, position) => {
-            send({ type: 'c2s:drag', componentId, position });
-          }}
-          onClick={(componentId, actionId) => {
-            send({ type: 'c2s:click', componentId, actionId });
-          }}
-          onFormSubmit={(componentId, values) => {
-            send({ type: 'c2s:form_submit', componentId, values });
-          }}
-        />
+        <Suspense fallback={<div className="loading-indicator">Loading canvas...</div>}>
+          <CanvasEditor
+            nodes={canvasState.nodes}
+            connections={canvasState.connections}
+            onDrag={(componentId, position) => {
+              send({ type: 'c2s:drag', componentId, position });
+            }}
+            onClick={(componentId, actionId) => {
+              send({ type: 'c2s:click', componentId, actionId });
+            }}
+            onFormSubmit={(componentId, values) => {
+              send({ type: 'c2s:form_submit', componentId, values });
+            }}
+          />
+        </Suspense>
       </div>
       <div className="chat-area">
-        <ChatPanel
-          messages={messages}
-          partialText={partialText}
-          agentStatus={agentStatus}
-          agentStatusMessage={agentStatusMessage}
-          connected={connected}
-          onSend={handleSendMessage}
-          onAbort={handleAbort}
-        />
+        <Suspense fallback={<div className="loading-indicator">Loading chat...</div>}>
+          <ChatPanel
+            messages={messages}
+            partialText={partialText}
+            agentStatus={agentStatus}
+            agentStatusMessage={agentStatusMessage}
+            connected={connected}
+            onSend={handleSendMessage}
+            onAbort={handleAbort}
+          />
+        </Suspense>
       </div>
     </div>
   );

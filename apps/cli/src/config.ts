@@ -116,7 +116,7 @@ export function getDefaultConfig(): Ch4pConfig {
     },
     verification: {
       enabled: true,
-      semantic: false,
+      semantic: true,
     },
   };
 }

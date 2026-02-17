@@ -19,11 +19,15 @@ export { WebSearchTool } from './web-search.js';
 export { MemoryStoreTool } from './memory-store.js';
 export { MemoryRecallTool } from './memory-recall.js';
 export { DelegateTool } from './delegate.js';
+export { BrowserTool } from './browser.js';
 export { McpClientTool } from './mcp-client.js';
 export { LoadSkillTool } from './load-skill.js';
 
 // Registry
 export { ToolRegistry } from './registry.js';
+
+// SSRF guards (shared by web-fetch and browser tools)
+export { isBlockedHostname, isPrivateIpV4, isPrivateIpV6, resolveAndCheckPrivate } from './ssrf-guards.js';
 
 // Snapshot utilities
 export { captureFileState } from './snapshot-utils.js';

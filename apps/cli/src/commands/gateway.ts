@@ -16,8 +16,10 @@
  */
 
 import type { Ch4pConfig, IChannel, InboundMessage, ISecurityPolicy, ITunnelProvider } from '@ch4p/core';
+import { generateId } from '@ch4p/core';
 import { loadConfig, getLogsDir } from '../config.js';
-import { SessionManager, GatewayServer, MessageRouter, PairingManager } from '@ch4p/gateway';
+import { SessionManager, GatewayServer, MessageRouter, PairingManager, Scheduler, LogChannel } from '@ch4p/gateway';
+import type { CronJob } from '@ch4p/gateway';
 import {
   ChannelRegistry,
   TelegramChannel,
@@ -28,6 +30,8 @@ import {
   WhatsAppChannel,
   SignalChannel,
   IMessageChannel,
+  TeamsChannel,
+  ZaloChannel,
 } from '@ch4p/channels';
 import { createTunnelProvider } from '@ch4p/tunnels';
 import { Session, AgentLoop, ContextManager, FormatVerifier, LLMVerifier, createAutoRecallHook, createAutoSummarizeHook } from '@ch4p/agent';
@@ -80,6 +84,10 @@ function createChannelInstance(channelName: string): IChannel | null {
       return new SignalChannel();
     case 'imessage':
       return new IMessageChannel();
+    case 'teams':
+      return new TeamsChannel();
+    case 'zalo':
+      return new ZaloChannel();
     default:
       return null;
   }
@@ -196,15 +204,6 @@ export async function gateway(args: string[]): Promise<void> {
     };
   }
 
-  const server = new GatewayServer({
-    port,
-    host,
-    sessionManager,
-    pairingManager,
-    defaultSessionConfig,
-    agentRegistration,
-  });
-
   // Create MessageRouter for channel → session routing.
   const messageRouter = new MessageRouter(sessionManager, defaultSessionConfig);
 
@@ -265,6 +264,43 @@ export async function gateway(args: string[]): Promise<void> {
     }
   }
 
+  // Per-user conversation context so messages within the same channel+user
+  // share history (like the REPL's sharedContext).
+  const conversationContexts = new Map<string, ContextManager>();
+
+  // Create LogChannel for cron/webhook responses (logs to observer).
+  const logChannel = new LogChannel({
+    onResponse: (_to, msg) => {
+      observer.onEvent?.({
+        type: 'cron_response',
+        timestamp: new Date(),
+        data: { text: msg.text },
+      });
+    },
+  });
+
+  const server = new GatewayServer({
+    port,
+    host,
+    sessionManager,
+    pairingManager,
+    defaultSessionConfig,
+    agentRegistration,
+    onWebhook: (name, payload) => {
+      const syntheticMsg: InboundMessage = {
+        id: generateId(16),
+        channelId: `webhook:${name}`,
+        from: { channelId: `webhook:${name}`, userId: payload.userId ?? 'webhook' },
+        text: payload.message,
+        timestamp: new Date(),
+      };
+      handleInboundMessage(
+        syntheticMsg, logChannel as unknown as IChannel, messageRouter, engine, config, observer,
+        conversationContexts, memoryBackend, skillRegistry, voiceProcessor,
+      );
+    },
+  });
+
   // Print startup banner.
   console.log(`\n  ${CYAN}${BOLD}ch4p Gateway${RESET}`);
   console.log(`  ${DIM}${'='.repeat(50)}${RESET}\n`);
@@ -300,10 +336,6 @@ export async function gateway(args: string[]): Promise<void> {
   console.log(`  ${DIM}  POST   /sessions/:id/steer  - inject message into session${RESET}`);
   console.log(`  ${DIM}  DELETE /sessions/:id        - end a session${RESET}`);
   console.log('');
-
-  // Per-user conversation context so messages within the same channel+user
-  // share history (like the REPL's sharedContext).
-  const conversationContexts = new Map<string, ContextManager>();
 
   // ----- Start channel adapters -----
   const channelRegistry = new ChannelRegistry();
@@ -372,6 +404,48 @@ export async function gateway(args: string[]): Promise<void> {
     console.log('');
   }
 
+  // ----- Start cron scheduler (optional) -----
+  let scheduler: Scheduler | undefined;
+  const schedulerCfg = (config as Record<string, unknown>).scheduler as Record<string, unknown> | undefined;
+  if (schedulerCfg?.enabled) {
+    const jobs = (schedulerCfg.jobs ?? []) as Array<{ name: string; schedule: string; message: string; enabled?: boolean; userId?: string }>;
+    if (jobs.length > 0) {
+      scheduler = new Scheduler({
+        onTrigger: (job: CronJob) => {
+          const syntheticMsg: InboundMessage = {
+            id: generateId(16),
+            channelId: `cron:${job.name}`,
+            from: { channelId: `cron:${job.name}`, userId: job.userId ?? 'cron' },
+            text: job.message,
+            timestamp: new Date(),
+          };
+          handleInboundMessage(
+            syntheticMsg, logChannel as unknown as IChannel, messageRouter, engine, config, observer,
+            conversationContexts, memoryBackend, skillRegistry, voiceProcessor,
+          );
+        },
+      });
+
+      for (const job of jobs) {
+        try {
+          scheduler.addJob(job);
+          console.log(`  ${GREEN}✓${RESET} cron: ${job.name} ${DIM}(${job.schedule})${RESET}`);
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.log(`  ${RED}✗${RESET} cron: ${job.name}: ${errMsg}`);
+        }
+      }
+
+      scheduler.start();
+      console.log(`  ${BOLD}Scheduler${RESET}     ${GREEN}running${RESET} (${scheduler.size} job${scheduler.size === 1 ? '' : 's'})`);
+      console.log('');
+    }
+  }
+
+  // Print webhook status.
+  console.log(`  ${BOLD}Webhooks${RESET}      ${GREEN}enabled${RESET} ${DIM}(POST /webhooks/:name)${RESET}`);
+  console.log('');
+
   if (requirePairing && pairingManager) {
     const code = pairingManager.generateCode('CLI startup');
     console.log(`  ${BOLD}Initial pairing code:${RESET} ${CYAN}${BOLD}${code.code}${RESET}`);
@@ -385,6 +459,11 @@ export async function gateway(args: string[]): Promise<void> {
   await new Promise<void>((resolve) => {
     const shutdown = async () => {
       console.log(`\n  ${DIM}Shutting down gateway...${RESET}`);
+
+      // Stop scheduler.
+      if (scheduler) {
+        scheduler.stop();
+      }
 
       // Stop channels.
       for (const channel of startedChannels) {
@@ -492,9 +571,10 @@ function handleInboundMessage(
       const session = new Session(routeResult.config, { sharedContext });
       const tools = ToolRegistry.createDefault({
         // In gateway mode, exclude heavyweight tools for safety.
+        // Browser is excluded by default (resource-intensive persistent process).
         exclude: config.autonomy.level === 'readonly'
-          ? ['bash', 'file_write', 'file_edit', 'delegate']
-          : ['delegate'],
+          ? ['bash', 'file_write', 'file_edit', 'delegate', 'browser']
+          : ['delegate', 'browser'],
       });
 
       // Register load_skill tool when skills are available.

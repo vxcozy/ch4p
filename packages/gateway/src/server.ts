@@ -14,6 +14,7 @@
  *   GET    /sessions/:id          - get a single session
  *   POST   /sessions/:id/steer    - steer (inject message into) a session
  *   DELETE /sessions/:id          - end a session
+ *   POST   /webhooks/:name        - receive a webhook trigger (auth required)
  *   WS     /ws/:sessionId         - WebSocket upgrade for canvas sessions
  *   GET    /*                     - static file serving (when staticDir configured)
  *
@@ -48,6 +49,8 @@ export interface GatewayServerOptions {
   onCanvasConnection?: (sessionId: string, bridge: WebSocketBridge) => void;
   /** Agent registration file served at GET /.well-known/agent.json (ERC-8004 service discovery). */
   agentRegistration?: Record<string, unknown>;
+  /** Called when a webhook message is received at POST /webhooks/:name. */
+  onWebhook?: (name: string, payload: { message: string; userId?: string }) => void;
 }
 
 export class GatewayServer {
@@ -62,6 +65,7 @@ export class GatewayServer {
   private readonly staticDir: string | null;
   private readonly onCanvasConnection: ((sessionId: string, bridge: WebSocketBridge) => void) | null;
   private readonly agentRegistration: Record<string, unknown> | null;
+  private readonly onWebhook: GatewayServerOptions['onWebhook'] | null;
 
   constructor(options: GatewayServerOptions) {
     this.port = options.port;
@@ -77,6 +81,7 @@ export class GatewayServer {
     this.staticDir = options.staticDir ?? null;
     this.onCanvasConnection = options.onCanvasConnection ?? null;
     this.agentRegistration = options.agentRegistration ?? null;
+    this.onWebhook = options.onWebhook ?? null;
   }
 
   /** Start listening on the configured port. */
@@ -391,6 +396,40 @@ export class GatewayServer {
         this.sendJson(res, 200, { sessionId, ended: true });
         return;
       }
+    }
+
+    // POST /webhooks/:name — receive a webhook trigger
+    const webhookMatch = url.match(/^\/webhooks\/([a-zA-Z0-9_-]+)$/);
+    if (method === 'POST' && webhookMatch) {
+      const webhookName = webhookMatch[1]!;
+
+      if (!this.onWebhook) {
+        this.sendJson(res, 404, { error: 'Webhooks are not enabled on this gateway.' });
+        return;
+      }
+
+      const body = await this.readBody(req);
+      let payload: { message?: string; userId?: string } = {};
+      try {
+        payload = JSON.parse(body) as { message?: string; userId?: string };
+      } catch {
+        this.sendJson(res, 400, { error: 'Invalid JSON body.' });
+        return;
+      }
+
+      if (!payload.message) {
+        this.sendJson(res, 400, { error: 'Missing "message" in request body.' });
+        return;
+      }
+
+      try {
+        this.onWebhook(webhookName, { message: payload.message, userId: payload.userId });
+        this.sendJson(res, 200, { webhook: webhookName, accepted: true });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.sendJson(res, 500, { error: `Webhook handler failed: ${errMsg}` });
+      }
+      return;
     }
 
     // ----- Static file serving (when configured) -----

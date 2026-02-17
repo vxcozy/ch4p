@@ -25,3 +25,12 @@ export { serveStatic } from './static.js';
 
 export { StreamHandler } from './stream-handler.js';
 export type { StreamHandlerOpts, StreamableEvent } from './stream-handler.js';
+
+export { parseCron, cronMatches } from './cron-parser.js';
+export type { CronSchedule } from './cron-parser.js';
+
+export { Scheduler } from './scheduler.js';
+export type { CronJob, SchedulerOptions } from './scheduler.js';
+
+export { LogChannel } from './log-channel.js';
+export type { LogChannelOptions } from './log-channel.js';

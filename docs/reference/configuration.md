@@ -132,6 +132,32 @@ Per-channel configuration. Each key is a channel name.
 | `accessToken` | `string` | **required** | Access token for authentication. |
 | `roomIds` | `string[]` | `[]` | Rooms to join. Empty = accept all invites. |
 
+### channels.teams
+
+Microsoft Teams via Bot Framework REST API v3.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `appId` | `string` | **required** | Bot Framework App ID. |
+| `appPassword` | `string` | **required** | Bot Framework App Password / Client Secret. |
+| `tenantId` | `string` | `null` | Azure AD tenant ID (for single-tenant bots). |
+| `allowedTeams` | `string[]` | `[]` | Allowed team IDs. Empty = all. |
+| `allowedUsers` | `string[]` | `[]` | Allowed user AAD IDs. Empty = all. |
+
+### channels.zalo
+
+Zalo Official Account via OA Open API v3.0.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `oaId` | `string` | **required** | Official Account ID. |
+| `oaSecretKey` | `string` | **required** | OA Secret Key for webhook MAC verification. |
+| `accessToken` | `string` | **required** | OA Access Token (obtained via OAuth). |
+| `refreshToken` | `string` | `null` | Refresh token for auto-renewal. |
+| `appId` | `string` | **required** | Zalo App ID (for token refresh and MAC). |
+| `appSecret` | `string` | `null` | Zalo App Secret (required for token refresh). |
+| `allowedUsers` | `string[]` | `[]` | Allowed user IDs. Empty = all. |
+
 ### channels.irc
 
 | Field | Type | Default | Description |
@@ -141,6 +167,64 @@ Per-channel configuration. Each key is a channel name.
 | `ssl` | `boolean` | `true` | Use TLS. |
 | `nick` | `string` | agent name | Bot nickname. |
 | `channels` | `string[]` | `[]` | Channels to join. |
+
+---
+
+## verification
+
+Hybrid task-level verification (AWM-inspired). Both format and semantic checks are active by default.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable task-level verification. |
+| `semantic` | `boolean` | `true` | Enable LLM-based semantic verification on top of format checks. |
+| `maxToolErrorRatio` | `number` | `0.5` | Maximum allowed ratio of failed tool calls before flagging. |
+
+---
+
+## search
+
+Web search configuration (Brave Search API).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Enable web search tool. |
+| `provider` | `string` | `"brave"` | Search provider. |
+| `apiKey` | `string` | `null` | API key (or `"${BRAVE_SEARCH_API_KEY}"` for env var). |
+| `maxResults` | `number` | `5` | Default result count per query. |
+| `country` | `string` | `null` | Country code for results (e.g., `"US"`, `"DE"`). |
+| `searchLang` | `string` | `null` | Search language code. |
+
+---
+
+## scheduler
+
+Built-in cron scheduler for recurring agent tasks.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Enable the cron scheduler. |
+| `jobs` | `CronJob[]` | `[]` | Array of scheduled jobs. |
+
+### CronJob
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | `string` | **required** | Job identifier. |
+| `schedule` | `string` | **required** | Cron expression (5-field: minute hour dom month dow). |
+| `message` | `string` | **required** | Message text sent to the agent on trigger. |
+
+---
+
+## webhooks
+
+Inbound webhook triggers for the gateway.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Enable webhook routes. |
+
+Webhook endpoint: `POST /webhooks/:name` with body `{ "message": "...", "userId": "..." }`. Requires pairing token authentication.
 
 ---
 

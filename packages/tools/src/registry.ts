@@ -19,6 +19,7 @@ import { WebSearchTool } from './web-search.js';
 import { MemoryStoreTool } from './memory-store.js';
 import { MemoryRecallTool } from './memory-recall.js';
 import { DelegateTool } from './delegate.js';
+import { BrowserTool } from './browser.js';
 
 export class ToolRegistry {
   private readonly tools = new Map<string, ITool>();
@@ -125,6 +126,7 @@ export class ToolRegistry {
       new MemoryStoreTool(),
       new MemoryRecallTool(),
       new DelegateTool(),
+      new BrowserTool(),
     ];
 
     for (const tool of allTools) {

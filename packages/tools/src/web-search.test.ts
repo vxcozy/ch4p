@@ -328,13 +328,46 @@ describe('WebSearchTool', () => {
   // -------------------------------------------------------------------------
 
   describe('execute() — API key', () => {
-    it('returns clear error when searchApiKey is missing', async () => {
-      const ctx = createSearchContext({ searchApiKey: undefined });
-      const result = await tool.execute({ query: 'test' }, ctx);
+    it('returns clear error when searchApiKey and env var are both missing', async () => {
+      const origEnv = process.env.BRAVE_SEARCH_API_KEY;
+      delete process.env.BRAVE_SEARCH_API_KEY;
+      try {
+        const ctx = createSearchContext({ searchApiKey: undefined });
+        const result = await tool.execute({ query: 'test' }, ctx);
 
-      expect(result.success).toBe(false);
-      expect(result.error).toMatch(/Search API key is not configured/);
-      expect(fetchSpy).not.toHaveBeenCalled();
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/no Brave Search API key found/);
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        if (origEnv !== undefined) process.env.BRAVE_SEARCH_API_KEY = origEnv;
+      }
+    });
+
+    it('falls back to BRAVE_SEARCH_API_KEY env var when context key is missing', async () => {
+      const origEnv = process.env.BRAVE_SEARCH_API_KEY;
+      process.env.BRAVE_SEARCH_API_KEY = 'env-fallback-key';
+      try {
+        fetchSpy.mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ web: { results: [] } }),
+        });
+
+        const ctx = createSearchContext({ searchApiKey: undefined });
+        const result = await tool.execute({ query: 'test with env fallback' }, ctx);
+
+        expect(result.success).toBe(true);
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+        // Verify the env var key was used.
+        const headers = fetchSpy.mock.calls[0][1].headers;
+        expect(headers['X-Subscription-Token']).toBe('env-fallback-key');
+      } finally {
+        if (origEnv !== undefined) {
+          process.env.BRAVE_SEARCH_API_KEY = origEnv;
+        } else {
+          delete process.env.BRAVE_SEARCH_API_KEY;
+        }
+      }
     });
   });
 

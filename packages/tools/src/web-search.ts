@@ -179,14 +179,18 @@ export class WebSearchTool implements ITool {
     const { query, count, offset, freshness, country } = args as WebSearchArgs;
     const searchContext = context as SearchToolContext;
 
-    // Check for API key.
-    if (!searchContext.searchApiKey) {
+    // Check for API key — try context extension first, then env var as fallback.
+    const apiKey = searchContext.searchApiKey || process.env.BRAVE_SEARCH_API_KEY;
+    if (!apiKey) {
       return {
         success: false,
         output: '',
         error:
-          'Search API key is not configured. Set BRAVE_SEARCH_API_KEY environment variable ' +
-          'or add search.apiKey to your ch4p config.',
+          'Web search is not available: no Brave Search API key found. ' +
+          'The BRAVE_SEARCH_API_KEY environment variable is not set, and ' +
+          'search.apiKey is not configured in ~/.ch4p/config.json. ' +
+          'Please tell the user to set the BRAVE_SEARCH_API_KEY environment variable ' +
+          'in the shell where the ch4p gateway is running.',
       };
     }
 
@@ -234,7 +238,7 @@ export class WebSearchTool implements ITool {
         headers: {
           'Accept': 'application/json',
           'Accept-Encoding': 'gzip',
-          'X-Subscription-Token': searchContext.searchApiKey,
+          'X-Subscription-Token': apiKey,
         },
       });
 

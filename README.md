@@ -46,10 +46,10 @@ corepack pnpm bundle    # ~58 MB binary via bun compile
 ## Architecture
 
 ```
-Channels (CLI, Telegram, Discord, Slack, ...)     Canvas (tldraw, WebSocket, A2UI)
-    |                                                  |
-Gateway (HTTP server, session routing)      Gateway (WS upgrade, static files)
-    |                                                  |
+Channels (CLI, Telegram, Discord, Slack, Teams, Zalo, ...)   Canvas (tldraw, WebSocket, A2UI)
+    |                                                              |
+Gateway (HTTP server, session routing, cron, webhooks)   Gateway (WS upgrade, static files)
+    |                                                              |
 Agent Runtime (session, context, steering queue, canvas_render tool)
     |
 Engine (native LLM, echo, CLI subprocess)
@@ -87,10 +87,10 @@ packages/
   agent/          # Agent runtime: session, context, steering, worker pool
   providers/      # LLM providers: Anthropic, OpenAI, Google, OpenRouter, Ollama, Bedrock
   engines/        # Execution engines: native (LLM), echo (testing), subprocess (CLI wrappers)
-  channels/       # Messaging: CLI, Telegram, Discord, Slack, Matrix, WhatsApp, Signal, iMessage
+  channels/       # Messaging: CLI, Telegram, Discord, Slack, Matrix, WhatsApp, Signal, iMessage, Teams, Zalo
   canvas/         # A2UI components, canvas state, WS protocol, CanvasTool, CanvasChannel
-  gateway/        # HTTP server, session routing, WebSocket bridge, pairing authentication, stream handler
-  tools/          # Built-in tools: bash, file ops, grep, glob, web fetch, memory, delegate, MCP client
+  gateway/        # HTTP server, session routing, WebSocket bridge, pairing, stream handler, cron scheduler, webhooks
+  tools/          # Built-in tools: bash, file ops, grep, glob, web fetch, web search, browser, memory, delegate, MCP client
   memory/         # Hybrid search: SQLite FTS5 + vector embeddings
   security/       # Filesystem scope, command allowlist, secrets, I/O sanitization
   supervisor/     # OTP-style supervision trees, health monitoring
@@ -149,9 +149,11 @@ Inspired by the Agent World Model research, ch4p implements several techniques f
 
 - **Mandatory tool call validation** — every tool call is validated before execution. Malformed arguments are fed back to the LLM as error messages for self-correction, avoiding wasted tool executions.
 - **State snapshots** — tools that modify external state capture observable state before and after execution. These diffs enable automated verification of tool outcomes.
-- **Task-level verification** — the optional `IVerifier` interface runs a two-phase check (format + semantic) after the agent completes a task, assessing whether the result is correct.
+- **Hybrid verification (default on)** — the `IVerifier` interface runs a two-phase check after each task: `FormatVerifier` (structural/rule-based) followed by `LLMVerifier` (semantic assessment using the AI engine). Both layers are active by default.
+- **Auto-memory hooks** — `autoRecallHook` retrieves relevant memories before the agent processes each message; `autoSummarizeHook` stores key learnings after each run completes. Active by default when memory is enabled.
 - **Named context strategies** — configurable truncation strategies with tunable parameters: compaction targets, keep ratios, tool-call pair preservation, and task description pinning.
 - **MCP tool connectivity** — the built-in MCP client tool connects to any Model Context Protocol server, discovering and proxying tools via `list_tools` + `call_tool`.
+- **Browser control** — Playwright-based browser tool for page navigation, clicking, typing, screenshots, and JS evaluation with SSRF protection.
 
 ## Memory
 
@@ -163,13 +165,22 @@ Hybrid search combining two retrieval strategies:
 
 Three backends: `sqlite` (primary), `markdown` (portable), `noop` (disabled).
 
+## Cron & Webhooks
+
+The gateway includes a built-in scheduler and webhook receiver for automated workflows:
+
+- **Cron jobs** — schedule recurring agent tasks using standard 5-field cron expressions (minute, hour, dom, month, dow). Zero external dependencies.
+- **Webhooks** — `POST /webhooks/:name` accepts inbound triggers with `{ message, userId? }` payloads, routed through the agent pipeline.
+
+Both features create synthetic inbound messages and process them through the same agent loop as channel messages.
+
 ## Development
 
 ```bash
 # Build all 18 packages
 corepack pnpm -r build
 
-# Run all 1656 tests
+# Run all 1835 tests
 corepack pnpm test
 
 # Build a single package
@@ -181,9 +192,9 @@ corepack pnpm --filter @ch4p/core build
 - 18 packages in a pnpm monorepo (use `corepack pnpm` — pnpm is not on PATH)
 - TypeScript strict mode, ES2023 target, NodeNext module resolution
 - ESM-only (all imports use `.js` extension)
-- Zero external runtime dependencies for core, security, and CLI packages
-- `tsup` for bundling, `vitest` for testing, `vite` for web frontend
-- 55 test files, 1656 tests
+- Zero required external runtime dependencies for core, security, and CLI packages (`playwright-core` is optional for browser tool)
+- `tsup` for bundling, `vitest` for testing, `vite` for web frontend (code-split with lazy loading)
+- 62 test files, 1835 tests
 
 ## Configuration
 
