@@ -162,4 +162,17 @@ export interface Ch4pConfig {
       trustedValidators?: string[];
     };
   };
+  /** Web search configuration (Brave Search API). */
+  search?: {
+    enabled: boolean;
+    provider: 'brave';
+    /** API key for the search provider. Supports ${ENV_VAR} substitution. */
+    apiKey?: string;
+    /** Maximum results per query (1-20). Default: 5. */
+    maxResults?: number;
+    /** Default country code for search localization (e.g., 'US'). */
+    country?: string;
+    /** Default search language (e.g., 'en'). */
+    searchLang?: string;
+  };
 }

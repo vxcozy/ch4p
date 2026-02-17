@@ -321,10 +321,18 @@ function wireCanvasSession(
           blockedPaths: config.security.blockedPaths,
         });
 
-        // Inject canvasState into the tool context.
-        const toolContextExtensions = {
+        // Inject canvasState (and search config when available) into the tool context.
+        const toolContextExtensions: Record<string, unknown> = {
           canvasState,
         };
+        if (config.search?.enabled && config.search.apiKey) {
+          toolContextExtensions.searchApiKey = config.search.apiKey;
+          toolContextExtensions.searchConfig = {
+            maxResults: config.search.maxResults,
+            country: config.search.country,
+            searchLang: config.search.searchLang,
+          };
+        }
 
         const loop = new AgentLoop(session, engine, tools.list(), observer, {
           maxIterations: 30,

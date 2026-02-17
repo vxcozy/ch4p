@@ -290,7 +290,7 @@ function createStubEngine(config: Ch4pConfig): IEngine {
 // Session + AgentLoop creation
 // ---------------------------------------------------------------------------
 
-function createSessionConfig(config: Ch4pConfig, skillRegistry?: SkillRegistry, hasMemory?: boolean): SessionConfig {
+function createSessionConfig(config: Ch4pConfig, skillRegistry?: SkillRegistry, hasMemory?: boolean, hasSearch?: boolean): SessionConfig {
   let systemPrompt =
     'You are ch4p, a personal AI assistant. ' +
     'You are helpful, concise, and security-conscious. ' +
@@ -302,6 +302,13 @@ function createSessionConfig(config: Ch4pConfig, skillRegistry?: SkillRegistry, 
       ' You have persistent memory — you can recall information from previous conversations ' +
       'and learn from interactions over time. Use the memory_store and memory_recall tools ' +
       'to explicitly save or retrieve specific information when helpful.';
+  }
+
+  // When search is available, let the LLM know it can search the web.
+  if (hasSearch) {
+    systemPrompt +=
+      ' You have web search capability — use the web_search tool to find ' +
+      'current information, look up facts, or research topics when needed.';
   }
 
   // Inject skill descriptions for progressive disclosure.
@@ -439,6 +446,17 @@ function createAgentLoop(
   const observer = createConfiguredObserver(config);
   const securityPolicy = createSecurityPolicy(config, sessionConfig.cwd ?? process.cwd());
 
+  // Build toolContextExtensions for search config when available.
+  const toolContextExtensions: Record<string, unknown> = {};
+  if (config.search?.enabled && config.search.apiKey) {
+    toolContextExtensions.searchApiKey = config.search.apiKey;
+    toolContextExtensions.searchConfig = {
+      maxResults: config.search.maxResults,
+      country: config.search.country,
+      searchLang: config.search.searchLang,
+    };
+  }
+
   return new AgentLoop(session, engine, tools.list(), observer, {
     maxIterations: extras?.maxIterations ?? 50,
     maxRetries: 3,
@@ -447,6 +465,9 @@ function createAgentLoop(
     securityPolicy,
     onBeforeFirstRun: extras?.onBeforeFirstRun,
     onAfterComplete: extras?.onAfterComplete,
+    toolContextExtensions: Object.keys(toolContextExtensions).length > 0
+      ? toolContextExtensions
+      : undefined,
   });
 }
 
@@ -495,7 +516,8 @@ async function runRepl(config: Ch4pConfig): Promise<void> {
   const skillRegistry = createSkillRegistry(config);
   const memoryBackend = createMemory(config);
   const hasMemory = !!memoryBackend;
-  const sessionConfig = createSessionConfig(config, skillRegistry, hasMemory);
+  const hasSearch = !!(config.search?.enabled && config.search.apiKey);
+  const sessionConfig = createSessionConfig(config, skillRegistry, hasMemory, hasSearch);
   const tools = createToolRegistry(config);
 
   // Create a shared ContextManager that persists across REPL messages.
@@ -665,7 +687,8 @@ async function runSingleMessage(config: Ch4pConfig, message: string): Promise<vo
   const skillRegistry = createSkillRegistry(config);
   const memoryBackend = createMemory(config);
   const hasMemory = !!memoryBackend;
-  const sessionConfig = createSessionConfig(config, skillRegistry, hasMemory);
+  const hasSearch = !!(config.search?.enabled && config.search.apiKey);
+  const sessionConfig = createSessionConfig(config, skillRegistry, hasMemory, hasSearch);
 
   // Wire auto-memory hooks for single-message mode.
   const autoSave = config.memory.autoSave !== false;

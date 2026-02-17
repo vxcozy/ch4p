@@ -367,7 +367,7 @@ describe('tools command', () => {
     await tools();
 
     const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(output).toContain('10 tools');
+    expect(output).toContain('11 tools');
 
     consoleSpy.mockRestore();
   });

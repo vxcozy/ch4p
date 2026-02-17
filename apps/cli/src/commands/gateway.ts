@@ -490,6 +490,17 @@ function handleInboundMessage(
         ? createAutoSummarizeHook(memoryBackend)
         : undefined;
 
+      // Build toolContextExtensions for search config when available.
+      const toolContextExtensions: Record<string, unknown> = {};
+      if (config.search?.enabled && config.search.apiKey) {
+        toolContextExtensions.searchApiKey = config.search.apiKey;
+        toolContextExtensions.searchConfig = {
+          maxResults: config.search.maxResults,
+          country: config.search.country,
+          searchLang: config.search.searchLang,
+        };
+      }
+
       const loop = new AgentLoop(session, engine, tools.list(), observer, {
         maxIterations: 20, // Lower limit for channel messages.
         maxRetries: 2,
@@ -498,6 +509,9 @@ function handleInboundMessage(
         securityPolicy,
         onBeforeFirstRun,
         onAfterComplete,
+        toolContextExtensions: Object.keys(toolContextExtensions).length > 0
+          ? toolContextExtensions
+          : undefined,
       });
 
       let responseText = '';

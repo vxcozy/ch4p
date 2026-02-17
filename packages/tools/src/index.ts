@@ -15,6 +15,7 @@ export { FileEditTool } from './file-edit.js';
 export { GrepTool } from './grep.js';
 export { GlobTool } from './glob.js';
 export { WebFetchTool } from './web-fetch.js';
+export { WebSearchTool } from './web-search.js';
 export { MemoryStoreTool } from './memory-store.js';
 export { MemoryRecallTool } from './memory-recall.js';
 export { DelegateTool } from './delegate.js';
@@ -28,6 +29,7 @@ export { ToolRegistry } from './registry.js';
 export { captureFileState } from './snapshot-utils.js';
 
 // Extended context types
+export type { SearchToolContext } from './web-search.js';
 export type { MemoryToolContext } from './memory-store.js';
 export type { DelegateToolContext } from './delegate.js';
 export type { McpServerConfig, McpTransport } from './mcp-client.js';

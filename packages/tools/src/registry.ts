@@ -15,6 +15,7 @@ import { FileEditTool } from './file-edit.js';
 import { GrepTool } from './grep.js';
 import { GlobTool } from './glob.js';
 import { WebFetchTool } from './web-fetch.js';
+import { WebSearchTool } from './web-search.js';
 import { MemoryStoreTool } from './memory-store.js';
 import { MemoryRecallTool } from './memory-recall.js';
 import { DelegateTool } from './delegate.js';
@@ -120,6 +121,7 @@ export class ToolRegistry {
       new GrepTool(),
       new GlobTool(),
       new WebFetchTool(),
+      new WebSearchTool(),
       new MemoryStoreTool(),
       new MemoryRecallTool(),
       new DelegateTool(),
