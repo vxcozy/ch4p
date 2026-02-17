@@ -30,7 +30,7 @@ import {
   IMessageChannel,
 } from '@ch4p/channels';
 import { createTunnelProvider } from '@ch4p/tunnels';
-import { Session, AgentLoop, ContextManager, createAutoRecallHook, createAutoSummarizeHook } from '@ch4p/agent';
+import { Session, AgentLoop, ContextManager, FormatVerifier, LLMVerifier, createAutoRecallHook, createAutoSummarizeHook } from '@ch4p/agent';
 import { NativeEngine, createClaudeCliEngine, createCodexCliEngine } from '@ch4p/engines';
 import { ProviderRegistry } from '@ch4p/providers';
 import { ToolRegistry, LoadSkillTool } from '@ch4p/tools';
@@ -529,10 +529,34 @@ function handleInboundMessage(
         };
       }
 
+      // AWM verifier — runs task-level verification after each agent response.
+      const vCfg = config.verification;
+      let verifier;
+      if (vCfg?.enabled) {
+        const formatOpts = { maxToolErrorRatio: vCfg.maxToolErrorRatio ?? 0.5 };
+        if (vCfg.semantic && engine) {
+          try {
+            const providerName = config.agent.provider;
+            const providerConfig = config.providers?.[providerName] as Record<string, unknown> | undefined;
+            const provider = ProviderRegistry.createProvider({
+              id: `${providerName}-verifier`,
+              type: providerName,
+              ...providerConfig,
+            });
+            verifier = new LLMVerifier({ provider, model: config.agent.model, formatOpts });
+          } catch {
+            verifier = new FormatVerifier(formatOpts);
+          }
+        } else {
+          verifier = new FormatVerifier(formatOpts);
+        }
+      }
+
       const loop = new AgentLoop(session, engine, tools.list(), observer, {
         maxIterations: 20, // Lower limit for channel messages.
         maxRetries: 2,
-        enableStateSnapshots: false,
+        enableStateSnapshots: true,
+        verifier,
         memoryBackend,
         securityPolicy,
         onBeforeFirstRun,

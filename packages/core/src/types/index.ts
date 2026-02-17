@@ -162,6 +162,16 @@ export interface Ch4pConfig {
       trustedValidators?: string[];
     };
   };
+  /** AWM (Agent World Model) verification configuration. */
+  verification?: {
+    /** Enable task-level verification. Default: true. */
+    enabled: boolean;
+    /** Enable LLM-based semantic checks in addition to format checks.
+     *  Requires an extra LLM call per completed task. Default: false. */
+    semantic: boolean;
+    /** Maximum allowed tool error ratio (0-1). Default: 0.5. */
+    maxToolErrorRatio?: number;
+  };
   /** Web search configuration (Brave Search API). */
   search?: {
     enabled: boolean;

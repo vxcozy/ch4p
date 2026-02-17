@@ -114,6 +114,10 @@ export function getDefaultConfig(): Ch4pConfig {
       autoLoad: true,
       contextBudget: 16000,
     },
+    verification: {
+      enabled: true,
+      semantic: false,
+    },
   };
 }
 

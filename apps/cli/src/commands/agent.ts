@@ -19,7 +19,7 @@ import { generateId } from '@ch4p/core';
 import { NativeEngine, createClaudeCliEngine, createCodexCliEngine, SubprocessEngine } from '@ch4p/engines';
 import type { SubprocessEngineConfig } from '@ch4p/engines';
 import { ProviderRegistry } from '@ch4p/providers';
-import { Session, AgentLoop, ContextManager, createAutoRecallHook, createAutoSummarizeHook } from '@ch4p/agent';
+import { Session, AgentLoop, ContextManager, FormatVerifier, LLMVerifier, createAutoRecallHook, createAutoSummarizeHook } from '@ch4p/agent';
 import type { AgentEvent, AgentLoopOpts, SessionOpts } from '@ch4p/agent';
 import { ToolRegistry, LoadSkillTool } from '@ch4p/tools';
 import { createObserver } from '@ch4p/observability';
@@ -425,6 +425,43 @@ function createSecurityPolicy(config: Ch4pConfig, cwd: string): ISecurityPolicy 
 }
 
 /**
+ * Create an AWM verifier from config.
+ * Returns a FormatVerifier by default; upgrades to LLMVerifier when semantic
+ * checks are enabled and an LLM provider is available.
+ */
+function createVerifier(config: Ch4pConfig, engine: IEngine) {
+  const vCfg = config.verification;
+  if (!vCfg?.enabled) return undefined;
+
+  const formatOpts = {
+    maxToolErrorRatio: vCfg.maxToolErrorRatio ?? 0.5,
+  };
+
+  if (vCfg.semantic) {
+    // LLMVerifier needs a provider. Try to reuse the agent's provider.
+    try {
+      const providerName = config.agent.provider;
+      const providerConfig = config.providers?.[providerName] as Record<string, unknown> | undefined;
+      const provider = ProviderRegistry.createProvider({
+        id: `${providerName}-verifier`,
+        type: providerName,
+        ...providerConfig,
+      });
+      return new LLMVerifier({
+        provider,
+        model: config.agent.model,
+        formatOpts,
+      });
+    } catch {
+      // Fall back to format-only if provider creation fails.
+      return new FormatVerifier(formatOpts);
+    }
+  }
+
+  return new FormatVerifier(formatOpts);
+}
+
+/**
  * Create a full AgentLoop wired with engine, tools, observer, memory, and security.
  */
 interface CreateAgentLoopExtras {
@@ -458,10 +495,14 @@ function createAgentLoop(
     };
   }
 
+  // AWM verifier — runs task-level verification after each agent response.
+  const verifier = createVerifier(config, engine);
+
   return new AgentLoop(session, engine, tools.list(), observer, {
     maxIterations: extras?.maxIterations ?? 50,
     maxRetries: 3,
     enableStateSnapshots: true,
+    verifier,
     memoryBackend,
     securityPolicy,
     onBeforeFirstRun: extras?.onBeforeFirstRun,
