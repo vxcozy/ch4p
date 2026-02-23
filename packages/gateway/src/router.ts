@@ -30,8 +30,11 @@ export class MessageRouter {
   /**
    * Route an inbound message to a session.
    *
-   * If a session already exists for the channel+user pair it is returned.
-   * Otherwise a new session is created from the default config.
+   * Routing key priority:
+   *   1. Group + thread (Telegram forum topic, Discord thread): all users in the
+   *      same thread share one session.
+   *   2. Group only: each user in the group gets their own session.
+   *   3. Private: keyed by userId (original behaviour).
    *
    * Returns `null` only if the message cannot be attributed to a user
    * (missing channelId).
@@ -39,7 +42,7 @@ export class MessageRouter {
   route(msg: InboundMessage): RouteResult | null {
     if (!msg.channelId) return null;
 
-    const routeKey = this.buildRouteKey(msg.channelId, msg.from.userId);
+    const routeKey = this.buildRouteKey(msg);
 
     // Check for an existing session
     const existingId = this.routeMap.get(routeKey);
@@ -72,7 +75,21 @@ export class MessageRouter {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private buildRouteKey(channelId: string, userId?: string): string {
+  private buildRouteKey(msg: InboundMessage): string {
+    const { channelId, from } = msg;
+    const { userId, groupId, threadId } = from;
+
+    // Forum topic / thread: all participants share one session per thread.
+    if (groupId && threadId) {
+      return `${channelId}:group:${groupId}:thread:${threadId}`;
+    }
+
+    // Regular group chat: each user has their own session.
+    if (groupId) {
+      return `${channelId}:group:${groupId}:user:${userId ?? 'anonymous'}`;
+    }
+
+    // Private / direct message: keyed by user.
     return `${channelId}:${userId ?? 'anonymous'}`;
   }
 }

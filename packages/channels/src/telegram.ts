@@ -66,6 +66,10 @@ interface TelegramMessage {
   message_id: number;
   from?: { id: number; first_name?: string; username?: string };
   chat: { id: number; type: string };
+  /** Present when the message belongs to a forum topic (supergroup with topics enabled). */
+  message_thread_id?: number;
+  /** True when the message is sent to a forum topic. */
+  is_topic_message?: boolean;
   text?: string;
   date: number;
   photo?: Array<{ file_id: string; file_size?: number }>;
@@ -195,6 +199,8 @@ export class TelegramChannel implements IChannel {
         text,
         ...(parseMode ? { parse_mode: parseMode } : {}),
         ...(message.replyTo ? { reply_to_message_id: Number(message.replyTo) } : {}),
+        // Thread replies: send into the correct forum topic.
+        ...(to.threadId ? { message_thread_id: Number(to.threadId) } : {}),
       };
 
       const result = await this.apiCall<TelegramMessage>('sendMessage', params);
@@ -202,7 +208,7 @@ export class TelegramChannel implements IChannel {
       // Send attachments if present.
       if (message.attachments?.length) {
         for (const att of message.attachments) {
-          await this.sendAttachment(chatId, att);
+          await this.sendAttachment(chatId, att, to.threadId);
         }
       }
 
@@ -248,6 +254,7 @@ export class TelegramChannel implements IChannel {
         message_id: Number(messageId),
         text,
         ...(parseMode ? { parse_mode: parseMode } : {}),
+        ...(to.threadId ? { message_thread_id: Number(to.threadId) } : {}),
       });
 
       this.lastEditTimestamps.set(messageId, now);
@@ -420,13 +427,21 @@ export class TelegramChannel implements IChannel {
       });
     }
 
+    const isGroup = msg.chat.type !== 'private';
+    const groupId = isGroup ? String(msg.chat.id) : undefined;
+    // message_thread_id is present on topic messages in forum supergroups.
+    const threadId = (isGroup && msg.is_topic_message && msg.message_thread_id !== undefined)
+      ? String(msg.message_thread_id)
+      : undefined;
+
     const inbound: InboundMessage = {
       id: String(msg.message_id),
       channelId: this.id,
       from: {
         channelId: this.id,
         userId,
-        groupId: msg.chat.type !== 'private' ? String(msg.chat.id) : undefined,
+        groupId,
+        threadId,
       },
       text,
       attachments: attachments.length > 0 ? attachments : undefined,
@@ -495,7 +510,7 @@ export class TelegramChannel implements IChannel {
     }
   }
 
-  private async sendAttachment(chatId: string, att: Attachment): Promise<void> {
+  private async sendAttachment(chatId: string, att: Attachment, threadId?: string): Promise<void> {
     // Detect OGG/Opus audio and use sendVoice (Telegram voice message) instead of sendAudio.
     const isVoice =
       att.type === 'audio' &&
@@ -527,6 +542,7 @@ export class TelegramChannel implements IChannel {
     await this.apiCall(method, {
       chat_id: chatId,
       [paramKey]: att.url ?? att.filename ?? '',
+      ...(threadId ? { message_thread_id: Number(threadId) } : {}),
     });
   }
 

@@ -273,6 +273,36 @@ export async function gateway(args: string[]): Promise<void> {
     }
   }
 
+  // In-flight tracker for graceful drain on SIGTERM.
+  // Incremented when an agent run starts, decremented when it finishes.
+  let inFlightCount = 0;
+  let drainResolve: (() => void) | null = null;
+
+  function waitForDrain(timeoutMs = 30_000): Promise<void> {
+    if (inFlightCount === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        drainResolve = null;
+        console.log(`  ${YELLOW}⚠ Drain timeout after ${timeoutMs / 1000}s — ${inFlightCount} message(s) still in flight${RESET}`);
+        resolve();
+      }, timeoutMs);
+      drainResolve = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+    });
+  }
+
+  function trackInflight(delta: 1 | -1): void {
+    inFlightCount += delta;
+    if (inFlightCount <= 0 && drainResolve) {
+      inFlightCount = 0;
+      const cb = drainResolve;
+      drainResolve = null;
+      cb();
+    }
+  }
+
   // Per-user conversation context so messages within the same channel+user
   // share history (like the REPL's sharedContext).
   const conversationContexts = new Map<string, ContextManager>();
@@ -305,7 +335,7 @@ export async function gateway(args: string[]): Promise<void> {
       };
       handleInboundMessage(
         syntheticMsg, logChannel as unknown as IChannel, messageRouter, engine, config, observer,
-        conversationContexts, memoryBackend, skillRegistry, voiceProcessor,
+        conversationContexts, memoryBackend, skillRegistry, voiceProcessor, trackInflight,
       );
     },
   });
@@ -382,7 +412,7 @@ export async function gateway(args: string[]): Promise<void> {
         channel.onMessage((msg: InboundMessage) => {
           handleInboundMessage(
             msg, channel, messageRouter, engine, config, observer,
-            conversationContexts, memoryBackend, skillRegistry, voiceProcessor,
+            conversationContexts, memoryBackend, skillRegistry, voiceProcessor, trackInflight,
           );
         });
 
@@ -468,7 +498,7 @@ export async function gateway(args: string[]): Promise<void> {
           };
           handleInboundMessage(
             syntheticMsg, logChannel as unknown as IChannel, messageRouter, engine, config, observer,
-            conversationContexts, memoryBackend, skillRegistry, voiceProcessor,
+            conversationContexts, memoryBackend, skillRegistry, voiceProcessor, trackInflight,
           );
         },
       });
@@ -507,18 +537,24 @@ export async function gateway(args: string[]): Promise<void> {
     const shutdown = async () => {
       console.log(`\n  ${DIM}Shutting down gateway...${RESET}`);
 
-      // Stop scheduler.
+      // Stop scheduler so no new cron triggers fire.
       if (scheduler) {
         scheduler.stop();
       }
 
-      // Stop channels via supervisor (handles graceful shutdown).
+      // Stop channels: no new inbound messages will arrive after this.
       if (channelSupervisor.isRunning) {
         try {
           await channelSupervisor.stop();
         } catch {
           // Best-effort stop.
         }
+      }
+
+      // Drain: wait for any in-flight agent runs to complete (30s timeout).
+      if (inFlightCount > 0) {
+        console.log(`  ${DIM}Draining ${inFlightCount} in-flight message(s)...${RESET}`);
+        await waitForDrain(30_000);
       }
 
       // Stop tunnel.
@@ -561,6 +597,9 @@ export async function gateway(args: string[]): Promise<void> {
  *   3. Run through AgentLoop to generate a response
  *   4. Optionally synthesize response audio via VoiceProcessor (TTS)
  *   5. Send the response back via the originating channel
+ *
+ * onInflightChange is called with +1 when processing starts and -1 when done,
+ * enabling the gateway to drain in-flight work before exiting.
  */
 function handleInboundMessage(
   msg: InboundMessage,
@@ -573,6 +612,7 @@ function handleInboundMessage(
   memoryBackend?: ReturnType<typeof createMemoryBackend>,
   skillRegistry?: SkillRegistry,
   voiceProcessor?: VoiceProcessor,
+  onInflightChange?: (delta: 1 | -1) => void,
 ): void {
   if (!engine) {
     // No engine available — send a polite error back.
@@ -593,6 +633,7 @@ function handleInboundMessage(
   if (!routeResult) return;
 
   // Run the agent asynchronously — don't block the channel handler.
+  onInflightChange?.(1);
   void (async () => {
     try {
       // Process voice attachments (STT) if voice is enabled.
@@ -603,9 +644,14 @@ function handleInboundMessage(
       // After voice processing, ensure we have text to work with.
       if (!processedMsg.text) return;
 
-      // Get or create a shared context for this channel+user so conversation
-      // history persists across messages (like the REPL's sharedContext).
-      const contextKey = `${msg.channelId ?? ''}:${msg.from.userId ?? 'anonymous'}`;
+      // Get or create a shared context — key mirrors MessageRouter.buildRouteKey
+      // so topic/thread conversations are isolated from each other.
+      const { userId, groupId, threadId } = msg.from;
+      const contextKey = (groupId && threadId)
+        ? `${msg.channelId ?? ''}:group:${groupId}:thread:${threadId}`
+        : groupId
+          ? `${msg.channelId ?? ''}:group:${groupId}:user:${userId ?? 'anonymous'}`
+          : `${msg.channelId ?? ''}:${userId ?? 'anonymous'}`;
       let sharedContext = conversationContexts.get(contextKey);
       if (!sharedContext) {
         sharedContext = new ContextManager();
@@ -726,6 +772,8 @@ function handleInboundMessage(
         text: `Sorry, I encountered an error: ${errMsg}`,
         replyTo: msg.id,
       }).catch(() => {});
+    } finally {
+      onInflightChange?.(-1);
     }
   })();
 }
