@@ -93,7 +93,7 @@ describe('getDefaultConfig', () => {
   it('returns a valid default configuration', () => {
     const config = getDefaultConfig();
 
-    expect(config.agent.model).toBe('claude-sonnet-4-20250514');
+    expect(config.agent.model).toBe('claude-sonnet-4-6');
     expect(config.agent.provider).toBe('anthropic');
     expect(config.agent.thinkingLevel).toBe('medium');
   });
@@ -225,7 +225,7 @@ describe('loadConfig', () => {
     // means the config is still valid (model and provider are present).
     const config = loadConfig();
 
-    expect(config.agent.model).toBe('claude-sonnet-4-20250514');
+    expect(config.agent.model).toBe('claude-sonnet-4-6');
     expect(config.agent.provider).toBe('anthropic');
     expect(config.gateway.port).toBe(18789);
   });
