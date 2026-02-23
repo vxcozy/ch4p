@@ -16,7 +16,7 @@
  */
 
 import type { Ch4pConfig, IChannel, InboundMessage, ISecurityPolicy, ITunnelProvider } from '@ch4p/core';
-import { createX402Middleware, X402PayTool } from '@ch4p/plugin-x402';
+import { createX402Middleware, X402PayTool, createEIP712Signer, walletAddress } from '@ch4p/plugin-x402';
 import type { X402Config } from '@ch4p/plugin-x402';
 import { generateId } from '@ch4p/core';
 import { loadConfig, getLogsDir } from '../config.js';
@@ -820,6 +820,20 @@ function handleInboundMessage(
           country: config.search.country,
           searchLang: config.search.searchLang,
         };
+      }
+
+      // Wire x402 EIP-712 signer when client private key is configured.
+      // This enables the X402PayTool to produce real on-chain payment signatures
+      // instead of the zero-filled placeholder used when no signer is provided.
+      if (x402PluginCfg?.enabled && x402PluginCfg.client?.privateKey) {
+        const cc = x402PluginCfg.client;
+        toolContextExtensions.x402Signer = createEIP712Signer(cc.privateKey, {
+          chainId:      cc.chainId,
+          tokenAddress: cc.tokenAddress,
+          tokenName:    cc.tokenName,
+          tokenVersion: cc.tokenVersion,
+        });
+        toolContextExtensions.agentWalletAddress = walletAddress(cc.privateKey);
       }
 
       // AWM verifier — runs task-level verification after each agent response.

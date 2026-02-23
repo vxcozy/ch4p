@@ -121,6 +121,41 @@ export interface X402ServerConfig {
 }
 
 /**
+ * Client-side wallet configuration for signing x402 payment authorizations.
+ * Set `x402.client.privateKey` (or `${X402_PRIVATE_KEY}` env substitution)
+ * in ~/.ch4p/config.json to enable live on-chain payments.
+ */
+export interface X402ClientConfig {
+  /**
+   * 0x-prefixed hex private key used to sign EIP-712 payment authorizations.
+   * Supports env-var substitution: `"${X402_PRIVATE_KEY}"`.
+   *
+   * ⚠️  Never commit a real private key to source control.
+   */
+  privateKey?: string;
+  /**
+   * ERC-20 token contract address.
+   * Default: USDC on Base mainnet (0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913).
+   */
+  tokenAddress?: string;
+  /**
+   * EIP-712 domain chain ID.
+   * Default: 8453 (Base mainnet).
+   */
+  chainId?: number;
+  /**
+   * EIP-712 domain token name.
+   * Default: "USD Coin".
+   */
+  tokenName?: string;
+  /**
+   * EIP-712 domain token version.
+   * Default: "2".
+   */
+  tokenVersion?: string;
+}
+
+/**
  * Top-level x402 plugin configuration (added to ~/.ch4p/config.json).
  */
 export interface X402Config {
@@ -128,4 +163,6 @@ export interface X402Config {
   enabled?: boolean;
   /** Server-side: protect gateway endpoints with payment requirements. */
   server?: X402ServerConfig;
+  /** Client-side: wallet config for signing payment authorizations. */
+  client?: X402ClientConfig;
 }

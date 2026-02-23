@@ -112,6 +112,22 @@ function classifyMimeType(mime: string | null): Attachment['type'] {
 // ---------------------------------------------------------------------------
 
 /**
+ * Maps outbound reaction type names to their 0-based position in the
+ * Messages tapback picker (the radial menu that appears after long-press
+ * or right-click on a bubble).
+ *
+ * Picker order (left → right): love, like, dislike, laugh, emphasis, question.
+ */
+const TAPBACK_SEND_MAP: Record<string, number> = {
+  love: 0, heart: 0,
+  like: 1, thumbsup: 1,
+  dislike: 2, thumbsdown: 2,
+  laugh: 3, haha: 3,
+  emphasis: 4, exclamation: 4,
+  question: 5,
+};
+
+/**
  * iMessage tapback types.
  * 2000–2005: adding a reaction. 3000–3005: removing a reaction.
  */
@@ -286,22 +302,91 @@ export class IMessageChannel implements IChannel {
   }
 
   /**
-   * Send a tapback reaction to a message.
+   * Send a tapback reaction to a specific message via JXA UI scripting.
    *
-   * Currently a stub — sending tapback reactions programmatically requires
-   * UI automation via JXA which is fragile and macOS-version-dependent.
-   * This is a placeholder for future implementation.
+   * Uses System Events accessibility API to:
+   *   1. Look up the message text + chat identifier from chat.db by GUID.
+   *   2. Focus the conversation in Messages.app.
+   *   3. Right-click the target message bubble.
+   *   4. Select the tapback from the context menu.
+   *
+   * Requires macOS 13+ and Accessibility permission for your terminal in
+   * System Settings > Privacy & Security > Accessibility.
+   *
+   * Valid reactionTypes: love, heart, like, thumbsup, dislike, thumbsdown,
+   *   laugh, haha, emphasis, exclamation, question.
    */
   async sendReaction(
     _to: Recipient,
-    _messageGuid: string,
-    _reactionType: string,
+    messageGuid: string,
+    reactionType: string,
   ): Promise<SendResult> {
-    return {
-      success: false,
-      error: 'Sending tapback reactions is not yet supported. ' +
-        'This requires JXA UI automation which is fragile and macOS-version-dependent.',
-    };
+    const reactionIndex = TAPBACK_SEND_MAP[reactionType.toLowerCase()];
+    if (reactionIndex === undefined) {
+      const valid = Object.keys(TAPBACK_SEND_MAP).join(', ');
+      return {
+        success: false,
+        error: `Unknown reaction type "${reactionType}". Valid types: ${valid}.`,
+      };
+    }
+
+    const info = await this.getMessageInfo(messageGuid);
+    if (!info) {
+      return {
+        success: false,
+        error: `Message with GUID "${messageGuid}" not found in chat.db.`,
+      };
+    }
+
+    const jxa = buildTapbackScript(info.chatIdentifier, info.text, reactionIndex);
+    try {
+      await execFile('osascript', ['-l', 'JavaScript', '-e', jxa]);
+      return { success: true };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.includes('not authorized') || errMsg.includes('assistive access')) {
+        return {
+          success: false,
+          error:
+            'Accessibility permission denied. Allow your terminal in ' +
+            'System Settings > Privacy & Security > Accessibility.',
+        };
+      }
+      return { success: false, error: errMsg };
+    }
+  }
+
+  /**
+   * Look up the plain text and chat_identifier for a message by GUID from chat.db.
+   * Returns null if the message is not found or the query fails.
+   */
+  private async getMessageInfo(
+    guid: string,
+  ): Promise<{ text: string; chatIdentifier: string } | null> {
+    const safeGuid = guid.replace(/'/g, "''");
+    const sql = `
+      SELECT m.text, c.chat_identifier
+      FROM message m
+      LEFT JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+      LEFT JOIN chat c ON cmj.chat_id = c.ROWID
+      WHERE m.guid = '${safeGuid}'
+      LIMIT 1
+    `;
+    try {
+      const { stdout } = await execFile('sqlite3', ['-json', this.dbPath, sql]);
+      const rows = JSON.parse(stdout || '[]') as Array<{
+        text: string | null;
+        chat_identifier: string | null;
+      }>;
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        text: row.text ?? '',
+        chatIdentifier: row.chat_identifier ?? '',
+      };
+    } catch {
+      return null;
+    }
   }
 
   onMessage(handler: (msg: InboundMessage) => void): void {
@@ -514,4 +599,94 @@ export class IMessageChannel implements IChannel {
       return [];
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// JXA tapback script builder (module-level, exported for testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a JXA (JavaScript for Automation) script that sends a tapback
+ * reaction to the most recent matching message bubble in Messages.app.
+ *
+ * The script:
+ *   1. Activates Messages.app.
+ *   2. Selects the conversation identified by `chatIdentifier` in the sidebar.
+ *   3. Locates the message bubble whose text starts with `messageText` (first 40 chars).
+ *   4. Right-clicks the bubble and selects "React…" from the context menu.
+ *   5. Clicks the tapback at position `reactionIndex` (0-based) in the submenu.
+ *
+ * @param chatIdentifier   The chat_identifier value from chat.db (e.g. "+15555550100").
+ * @param messageText      The plain text of the target message.
+ * @param reactionIndex    0-based index in the tapback picker (love=0, like=1, ...).
+ */
+export function buildTapbackScript(
+  chatIdentifier: string,
+  messageText: string,
+  reactionIndex: number,
+): string {
+  /** Escape a string for embedding inside a JXA double-quoted string. */
+  const esc = (s: string): string =>
+    s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+
+  return `(function() {
+  const app = Application("Messages");
+  app.activate();
+  delay(0.5);
+  const se = Application("System Events");
+  const proc = se.processes.byName("Messages");
+
+  // Select the conversation in the sidebar.
+  try {
+    const sidebar = proc.windows[0].splitterGroups[0].scrollAreas[0];
+    const rows = sidebar.tables[0].rows();
+    for (const row of rows) {
+      try {
+        const label = row.staticTexts[0].value();
+        if (label && label.includes("${esc(chatIdentifier)}")) {
+          row.select();
+          break;
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+  delay(0.3);
+
+  // Find the message bubble.
+  let msgEl = null;
+  const targetText = "${esc(messageText.slice(0, 40))}";
+  try {
+    const msgArea = proc.windows[0].splitterGroups[0].scrollAreas[1];
+    const groups = msgArea.groups();
+    for (const g of groups) {
+      try {
+        const txt = g.staticTexts[0].value();
+        if (txt && txt.includes(targetText)) {
+          msgEl = g;
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+
+  if (!msgEl) return "message_not_found";
+
+  // Right-click the bubble to open the context menu.
+  const pos = msgEl.position();
+  const size = msgEl.size();
+  se.rightClick({ at: [pos[0] + size[0] / 2, pos[1] + size[1] / 2] });
+  delay(0.3);
+
+  // Click "React\u2026" item.
+  try {
+    const menu = proc.windows[0].menus[0];
+    const reactItem = menu.menuItems.byName("React\u2026");
+    reactItem.actions.byName("AXPress").perform();
+    delay(0.2);
+    reactItem.menus[0].menuItems[${reactionIndex}].actions.byName("AXPress").perform();
+  } catch (err) {
+    return "react_menu_error: " + err.toString();
+  }
+
+  return "ok";
+})()`;
 }

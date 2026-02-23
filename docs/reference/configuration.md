@@ -535,6 +535,9 @@ x402 HTTP micropayment plugin (`@ch4p/plugin-x402`). Disabled by default.
       "description": "Payment required to access this gateway.",
       "protectedPaths": ["/sessions", "/sessions/*", "/webhooks/*"],
       "maxTimeoutSeconds": 300
+    },
+    "client": {
+      "privateKey": "${X402_PRIVATE_KEY}"
     }
   }
 }
@@ -550,6 +553,13 @@ x402 HTTP micropayment plugin (`@ch4p/plugin-x402`). Disabled by default.
 | `server.description` | `string` | auto | Human-readable payment description in the 402 response. |
 | `server.protectedPaths` | `string[]` | `["/*"]` | Paths to gate. Supports `"/*"` wildcard suffix. System paths are always exempt. |
 | `server.maxTimeoutSeconds` | `number` | `300` | Payment authorization TTL in seconds. |
+| `client.privateKey` | `string` | — | 0x-prefixed private key for signing payment authorizations. Use env-var substitution: `"${X402_PRIVATE_KEY}"`. ⚠️ Never commit a real key. |
+| `client.tokenAddress` | `string` | USDC on Base | ERC-20 token contract address for the EIP-712 domain. |
+| `client.chainId` | `number` | `8453` | EIP-712 domain chain ID. Use `84532` for Base Sepolia. |
+| `client.tokenName` | `string` | `"USD Coin"` | EIP-712 domain token name. |
+| `client.tokenVersion` | `string` | `"2"` | EIP-712 domain token version. |
+
+When `client.privateKey` is set, the `x402_pay` tool produces real on-chain EIP-712 signatures instead of placeholder values. The agent's wallet address is derived automatically from the private key.
 
 When enabled, the `x402_pay` agent tool is registered automatically for gateway sessions. See the [Use x402 Payments](../how-to/use-x402.md) guide.
 

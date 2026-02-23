@@ -29,13 +29,19 @@ import { EngineError, generateId } from '@ch4p/core';
 import { spawn, type ChildProcess } from 'node:child_process';
 
 // ---------------------------------------------------------------------------
-// Internal types for tool call parsing
+// Internal types
 // ---------------------------------------------------------------------------
 
-interface ParsedToolCall {
-  id: string;
-  tool: string;
-  args: unknown;
+/**
+ * State stored in a ResumeToken so a SubprocessEngine run can be resumed
+ * by reconstructing a new Job with the prior message history + new prompt.
+ */
+interface SubprocessResumeState {
+  sessionId: string;
+  messages: Message[];
+  tools?: ToolDefinition[];
+  systemPrompt?: string;
+  model?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -179,11 +185,25 @@ export class SubprocessEngine implements IEngine {
   // IEngine.resume
   // -----------------------------------------------------------------------
 
-  async resume(_token: ResumeToken, _prompt: string): Promise<RunHandle> {
-    throw new EngineError(
-      'SubprocessEngine does not support resume. Start a new run instead.',
-      this.id,
-    );
+  async resume(token: ResumeToken, prompt: string): Promise<RunHandle> {
+    if (token.engineId !== this.id) {
+      throw new EngineError(
+        `Resume token is for engine "${token.engineId}", not "${this.id}"`,
+        this.id,
+      );
+    }
+    const state = token.state as SubprocessResumeState | undefined;
+    if (!state) {
+      throw new EngineError('Invalid or missing resume state in token', this.id);
+    }
+    const job: Job = {
+      sessionId: state.sessionId,
+      messages: [...(state.messages ?? []), { role: 'user', content: prompt }],
+      tools: state.tools,
+      systemPrompt: state.systemPrompt,
+      model: state.model,
+    };
+    return this.startRun(job);
   }
 
   // -----------------------------------------------------------------------
@@ -192,7 +212,7 @@ export class SubprocessEngine implements IEngine {
 
   private async *runSubprocess(
     prompt: string,
-    _ref: string,
+    ref: string,
     job: Job,
     abortController: AbortController,
     onProgress?: (event: EngineEvent) => void,
@@ -202,7 +222,20 @@ export class SubprocessEngine implements IEngine {
       return event;
     };
 
-    yield emit({ type: 'started' });
+    yield emit({
+      type: 'started',
+      resumeToken: {
+        engineId: this.id,
+        ref,
+        state: {
+          sessionId: job.sessionId,
+          messages: job.messages,
+          tools: job.tools,
+          systemPrompt: job.systemPrompt,
+          model: job.model,
+        } satisfies SubprocessResumeState,
+      },
+    });
 
     const hasTools = (job.tools?.length ?? 0) > 0;
 
@@ -258,10 +291,12 @@ export class SubprocessEngine implements IEngine {
       }
 
       let fullAnswer = '';
+      let cleanText  = '';
+      const parser = new StreamingToolParser();
 
-      // Stream stdout. When tools are configured we buffer the full output
-      // and parse for tool_call blocks after completion. Without tools we
-      // emit text_delta events in real-time as today.
+      // Stream stdout in real-time regardless of whether tools are configured.
+      // StreamingToolParser watches for <tool_call>…</tool_call> boundaries and
+      // emits text_delta events for all content outside those blocks.
       if (child.stdout) {
         for await (const chunk of child.stdout) {
           if (abortController.signal.aborted) break;
@@ -269,9 +304,25 @@ export class SubprocessEngine implements IEngine {
           const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
           fullAnswer += text;
 
-          if (!hasTools) {
-            yield emit({ type: 'text_delta', delta: text });
+          for (const ev of parser.process(text)) {
+            if (ev.type === 'text') {
+              cleanText += ev.delta;
+              yield emit({ type: 'text_delta', delta: ev.delta });
+            } else {
+              yield emit({
+                type: 'tool_start',
+                id: generateId(),
+                tool: ev.tool,
+                args: ev.args,
+              });
+            }
           }
+        }
+        // Flush any partial tag held back during streaming.
+        const tail = parser.flush();
+        if (tail) {
+          cleanText += tail;
+          yield emit({ type: 'text_delta', delta: tail });
         }
       }
 
@@ -330,24 +381,9 @@ export class SubprocessEngine implements IEngine {
         return;
       }
 
-      // When tools are configured, parse the buffered output for tool calls.
-      if (hasTools) {
-        const { text, toolCalls } = this.parseToolCalls(fullAnswer);
-
-        // Emit clean text (tool_call blocks stripped).
-        if (text) {
-          yield emit({ type: 'text_delta', delta: text });
-        }
-
-        // Emit tool_start events so the AgentLoop executes each tool.
-        for (const tc of toolCalls) {
-          yield emit({ type: 'tool_start', id: tc.id, tool: tc.tool, args: tc.args });
-        }
-
-        yield emit({ type: 'completed', answer: text });
-      } else {
-        yield emit({ type: 'completed', answer: fullAnswer.trim() });
-      }
+      // Events were emitted in real-time by StreamingToolParser during streaming.
+      // Emit completion using the clean text (tool_call blocks stripped).
+      yield emit({ type: 'completed', answer: cleanText.trim() || fullAnswer.trim() });
     } catch (err) {
       if (abortController.signal.aborted) {
         yield emit({
@@ -469,48 +505,6 @@ export class SubprocessEngine implements IEngine {
   }
 
   // -----------------------------------------------------------------------
-  // Private: tool call parsing
-  // -----------------------------------------------------------------------
-
-  /**
-   * Extract `<tool_call>` blocks from subprocess output.
-   *
-   * Returns the clean text (tool blocks removed) and an array of parsed
-   * tool calls. Malformed JSON blocks are silently left in the text.
-   */
-  private parseToolCalls(output: string): { text: string; toolCalls: ParsedToolCall[] } {
-    const toolCalls: ParsedToolCall[] = [];
-    const regex = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/g;
-    let text = output;
-
-    // Collect matches first, then remove from text (avoids index shifting).
-    const matches: Array<{ full: string; json: string }> = [];
-    let match;
-    while ((match = regex.exec(output)) !== null) {
-      matches.push({ full: match[0], json: match[1]! });
-    }
-
-    for (const m of matches) {
-      try {
-        const parsed = JSON.parse(m.json) as Record<string, unknown>;
-        if (typeof parsed.tool === 'string' && parsed.args !== undefined) {
-          toolCalls.push({
-            id: generateId(),
-            tool: parsed.tool,
-            args: parsed.args,
-          });
-          // Remove the matched block from the text output.
-          text = text.replace(m.full, '');
-        }
-      } catch {
-        // Malformed JSON — leave the block in text as-is.
-      }
-    }
-
-    return { text: text.trim(), toolCalls };
-  }
-
-  // -----------------------------------------------------------------------
   // Private: prompt extraction
   // -----------------------------------------------------------------------
 
@@ -588,6 +582,115 @@ export class SubprocessEngine implements IEngine {
     }
     return '';
   }
+}
+
+// ---------------------------------------------------------------------------
+// StreamingToolParser
+// ---------------------------------------------------------------------------
+
+const TOOL_OPEN  = '<tool_call>';
+const TOOL_CLOSE = '</tool_call>';
+
+interface StreamingTextEvent  { type: 'text'; delta: string }
+interface StreamingToolEvent  { type: 'tool'; tool: string; args: unknown }
+type StreamingEvent = StreamingTextEvent | StreamingToolEvent;
+
+/**
+ * Incremental parser for the `<tool_call>…</tool_call>` protocol used by
+ * SubprocessEngine.  Exported for unit testing.  Accepts arbitrary chunks
+ * and emits events in real-time:
+ *   - { type: 'text', delta } — safe text outside any tool_call block
+ *   - { type: 'tool', tool, args } — a fully parsed tool call
+ *
+ * Handles partial tag boundaries across chunk splits.  If a chunk ends with
+ * the first few characters of `<tool_call>`, those bytes are held back until
+ * the next chunk confirms whether they form an opening tag.
+ */
+export class StreamingToolParser {
+  private state: 'streaming' | 'buffering' = 'streaming';
+  /** Partial TOOL_OPEN prefix held back while in streaming mode. */
+  private hold = '';
+  /** Accumulated content between <tool_call> and </tool_call>. */
+  private buf  = '';
+
+  process(chunk: string): StreamingEvent[] {
+    const out: StreamingEvent[] = [];
+    let remaining = this.hold + chunk;
+    this.hold = '';
+
+    while (remaining.length > 0) {
+      if (this.state === 'streaming') {
+        const idx = remaining.indexOf(TOOL_OPEN);
+        if (idx === -1) {
+          // No full open tag found — hold back a suffix that could be a
+          // partial match (up to TOOL_OPEN.length - 1 bytes).
+          const holdLen = longestPrefixMatchingSuffix(remaining, TOOL_OPEN);
+          const safe = remaining.slice(0, remaining.length - holdLen);
+          if (safe) out.push({ type: 'text', delta: safe });
+          this.hold = remaining.slice(remaining.length - holdLen);
+          remaining = '';
+        } else {
+          // Emit text before the tag.
+          if (idx > 0) out.push({ type: 'text', delta: remaining.slice(0, idx) });
+          remaining = remaining.slice(idx + TOOL_OPEN.length);
+          this.state = 'buffering';
+          this.buf = '';
+        }
+      } else {
+        // Buffering inside a tool_call block.
+        // Search in the combined (buf + remaining) so that the closing tag is
+        // found even when it is split across chunk boundaries.
+        const combined   = this.buf + remaining;
+        const closeIdx   = combined.indexOf(TOOL_CLOSE);
+        if (closeIdx === -1) {
+          this.buf  = combined;
+          remaining = '';
+        } else {
+          const jsonContent = combined.slice(0, closeIdx);
+          remaining = combined.slice(closeIdx + TOOL_CLOSE.length);
+          try {
+            const parsed = JSON.parse(jsonContent.trim()) as Record<string, unknown>;
+            if (typeof parsed.tool === 'string' && parsed.args !== undefined) {
+              out.push({ type: 'tool', tool: parsed.tool, args: parsed.args });
+            } else {
+              // Valid JSON but missing expected fields — emit as text.
+              out.push({ type: 'text', delta: TOOL_OPEN + jsonContent + TOOL_CLOSE });
+            }
+          } catch {
+            // Malformed JSON — emit the raw block as text so it's visible.
+            out.push({ type: 'text', delta: TOOL_OPEN + jsonContent + TOOL_CLOSE });
+          }
+          this.buf  = '';
+          this.state = 'streaming';
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Call after the stream ends.  Returns any bytes held back or an incomplete
+   * tool_call block that never received a closing tag.
+   */
+  flush(): string {
+    if (this.state === 'buffering' && this.buf) {
+      return TOOL_OPEN + this.buf;
+    }
+    return this.hold;
+  }
+}
+
+/**
+ * Returns the length of the longest prefix of `pattern` that matches a
+ * suffix of `text`.  Used to determine how many bytes to hold back when
+ * we suspect an opening tag is split across two chunks.
+ */
+export function longestPrefixMatchingSuffix(text: string, pattern: string): number {
+  const maxLen = Math.min(text.length, pattern.length - 1);
+  for (let len = maxLen; len >= 1; len--) {
+    if (text.endsWith(pattern.slice(0, len))) return len;
+  }
+  return 0;
 }
 
 // ---------------------------------------------------------------------------

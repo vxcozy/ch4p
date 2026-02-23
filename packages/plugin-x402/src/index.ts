@@ -23,8 +23,12 @@ export { pathMatches, decodePaymentHeader } from './middleware.js';
 export { X402PayTool } from './x402-pay-tool.js';
 export type { X402ToolContext } from './x402-pay-tool.js';
 
+export { createEIP712Signer, walletAddress, KNOWN_TOKENS } from './signer.js';
+export type { EIP712SignerOpts } from './signer.js';
+
 export type {
   X402Config,
+  X402ClientConfig,
   X402ServerConfig,
   X402Response,
   X402PaymentRequirements,

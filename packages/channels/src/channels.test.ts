@@ -2410,13 +2410,14 @@ describe('IMessageChannel', () => {
   });
 
   // -----------------------------------------------------------------------
-  // sendReaction stub
+  // sendReaction
   // -----------------------------------------------------------------------
 
-  it('sendReaction returns not-yet-supported error', async () => {
+  it('sendReaction returns success: false with GUID-not-found when message is absent', async () => {
     const ch = new IMessageChannel();
     await ch.start({ dbPath: '/tmp/test-chat.db' });
 
+    // No mock for the sqlite3 getMessageInfo query, so it returns null → GUID not found.
     const result = await ch.sendReaction(
       { channelId: 'imessage', userId: '+15551234567' },
       'GUID-123',
@@ -2424,7 +2425,7 @@ describe('IMessageChannel', () => {
     );
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('not yet supported');
+    expect(result.error).toContain('GUID-123');
 
     await ch.stop();
   });

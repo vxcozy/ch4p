@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { IMessageChannel } from './imessage.js';
+import { IMessageChannel, buildTapbackScript } from './imessage.js';
 
 // ---------------------------------------------------------------------------
 // Mock child_process
@@ -560,21 +560,8 @@ describe('IMessageChannel', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // sendReaction (stub)
-  // -------------------------------------------------------------------------
-
-  describe('sendReaction()', () => {
-    it('returns { success: false } with error mentioning "not yet supported"', async () => {
-      const result = await channel.sendReaction(
-        { channelId: 'imessage', userId: '+15551234567' },
-        'some-guid',
-        'like',
-      );
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('not yet supported');
-    });
-  });
+  // sendReaction() tests follow after the polling section below.
+  // (The comprehensive sendReaction tests are in the separate describe block at the end of this file.)
 
   // -------------------------------------------------------------------------
   // Polling — inbound message processing
@@ -1027,5 +1014,196 @@ describe('IMessageChannel', () => {
       expect(msg.timestamp).toBeInstanceOf(Date);
       expect(msg.timestamp.getTime()).toBe(Date.UTC(2001, 0, 1));
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // sendReaction()
+  // -------------------------------------------------------------------------
+
+  describe('sendReaction()', () => {
+    /** Helper: mock that handles sqlite3 boilerplate + one getMessageInfo query. */
+    async function mockWithMessageInfo(
+      overrides: {
+        messageInfoRow?: Record<string, unknown> | null;
+        osascriptError?: Error | null;
+      } = {},
+    ) {
+      const execMock = await getExecFileMock();
+      const {
+        messageInfoRow = { text: 'Hello there', chat_identifier: '+15550000001' },
+        osascriptError = null,
+      } = overrides;
+
+      execMock.mockImplementation(
+        (cmd: string, args: string[], cb: (err: Error | null, result?: { stdout: string }) => void) => {
+          if (cmd === 'which') { cb(null, { stdout: '/usr/bin/sqlite3' }); return; }
+          if (cmd === 'sqlite3') {
+            const query: string = args[2] ?? '';
+            if (query.includes('MAX(ROWID)')) {
+              cb(null, { stdout: JSON.stringify([{ max_id: 0 }]) });
+              return;
+            }
+            // getMessageInfo query (joins message + chat)
+            if (query.includes('FROM message m') && query.includes('chat_identifier')) {
+              const row = messageInfoRow ? [messageInfoRow] : [];
+              cb(null, { stdout: JSON.stringify(row) });
+              return;
+            }
+            cb(null, { stdout: '[]' });
+            return;
+          }
+          if (cmd === 'osascript') {
+            if (osascriptError) { cb(osascriptError); return; }
+            cb(null, { stdout: '' });
+            return;
+          }
+          cb(null, { stdout: '' });
+        },
+      );
+      return execMock;
+    }
+
+    it('returns success: false with helpful message for unknown reaction type', async () => {
+      await channel.start({ dbPath: '/tmp/test.db', pollInterval: 60000 });
+      const result = await channel.sendReaction(
+        { channelId: 'imessage', userId: '+15550000001' },
+        'guid-123',
+        'fistbump',  // not a real tapback type
+      );
+      await channel.stop();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('fistbump');
+      expect(result.error).toContain('love');  // should list valid types
+    });
+
+    it('returns success: false when message GUID is not found in chat.db', async () => {
+      await mockWithMessageInfo({ messageInfoRow: null });
+      await channel.start({ dbPath: '/tmp/test.db', pollInterval: 60000 });
+      const result = await channel.sendReaction(
+        { channelId: 'imessage', userId: '+15550000001' },
+        'nonexistent-guid',
+        'love',
+      );
+      await channel.stop();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('nonexistent-guid');
+    });
+
+    it('returns success: false with Accessibility guidance when osascript is denied', async () => {
+      await mockWithMessageInfo({
+        osascriptError: new Error('not authorized to send Apple events to System Events'),
+      });
+      await channel.start({ dbPath: '/tmp/test.db', pollInterval: 60000 });
+      const result = await channel.sendReaction(
+        { channelId: 'imessage', userId: '+15550000001' },
+        'guid-abc',
+        'like',
+      );
+      await channel.stop();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Accessibility');
+      expect(result.error).toContain('System Settings');
+    });
+
+    it('returns success: true when osascript succeeds', async () => {
+      await mockWithMessageInfo();
+      await channel.start({ dbPath: '/tmp/test.db', pollInterval: 60000 });
+      const result = await channel.sendReaction(
+        { channelId: 'imessage', userId: '+15550000001' },
+        'guid-def',
+        'love',
+      );
+      await channel.stop();
+
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts reaction type aliases (heart → love index 0, thumbsup → like index 1)', async () => {
+      const execMock = await mockWithMessageInfo();
+      const capturedOsascriptArgs: string[][] = [];
+
+      execMock.mockImplementation(
+        (cmd: string, args: string[], cb: (err: Error | null, result?: { stdout: string }) => void) => {
+          if (cmd === 'which') { cb(null, { stdout: '/usr/bin/sqlite3' }); return; }
+          if (cmd === 'sqlite3') {
+            const query: string = args[2] ?? '';
+            if (query.includes('MAX(ROWID)')) {
+              cb(null, { stdout: JSON.stringify([{ max_id: 0 }]) });
+              return;
+            }
+            if (query.includes('FROM message m') && query.includes('chat_identifier')) {
+              cb(null, { stdout: JSON.stringify([{ text: 'Hi', chat_identifier: '+15550000001' }]) });
+              return;
+            }
+            cb(null, { stdout: '[]' });
+            return;
+          }
+          if (cmd === 'osascript') {
+            capturedOsascriptArgs.push([...args]);
+            cb(null, { stdout: '' });
+            return;
+          }
+          cb(null, { stdout: '' });
+        },
+      );
+
+      await channel.start({ dbPath: '/tmp/test.db', pollInterval: 60000 });
+      await channel.sendReaction({ channelId: 'imessage', userId: '+15550000001' }, 'guid-1', 'heart');
+      await channel.sendReaction({ channelId: 'imessage', userId: '+15550000001' }, 'guid-2', 'thumbsup');
+      await channel.stop();
+
+      // Both should have succeeded (osascript was called twice).
+      expect(capturedOsascriptArgs).toHaveLength(2);
+      // JXA script for 'heart' should use reactionIndex 0.
+      expect(capturedOsascriptArgs[0]![3]).toContain('menuItems[0]');
+      // JXA script for 'thumbsup' should use reactionIndex 1.
+      expect(capturedOsascriptArgs[1]![3]).toContain('menuItems[1]');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildTapbackScript unit tests
+// ---------------------------------------------------------------------------
+
+describe('buildTapbackScript', () => {
+  it('returns a string containing osascript JXA structure', () => {
+    const script = buildTapbackScript('+15555550100', 'Hello world', 0);
+    expect(typeof script).toBe('string');
+    expect(script).toContain('Application("Messages")');
+    expect(script).toContain('Application("System Events")');
+  });
+
+  it('embeds the chatIdentifier in the script', () => {
+    const script = buildTapbackScript('+15555551234', 'Some message', 2);
+    expect(script).toContain('+15555551234');
+  });
+
+  it('embeds the first 40 chars of messageText', () => {
+    const long = 'A'.repeat(80);
+    const script = buildTapbackScript('chat-id', long, 1);
+    // Should only embed the first 40 chars of messageText.
+    expect(script).toContain('A'.repeat(40));
+    // Should not embed all 80 chars literally as a 80-char string.
+    expect(script).not.toContain('A'.repeat(41));
+  });
+
+  it('embeds the reaction index', () => {
+    const script = buildTapbackScript('id', 'text', 3);
+    expect(script).toContain('menuItems[3]');
+  });
+
+  it('escapes double quotes in chatIdentifier', () => {
+    const script = buildTapbackScript('she said "hi"', 'text', 0);
+    expect(script).not.toContain('"hi"');  // raw unescaped double quote would break JXA
+    expect(script).toContain('\\"hi\\"');
+  });
+
+  it('escapes backslashes in messageText', () => {
+    const script = buildTapbackScript('id', 'path\\to\\file', 0);
+    expect(script).toContain('path\\\\to\\\\file');
   });
 });

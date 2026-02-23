@@ -17,6 +17,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@ch4p/core": "workspace:*"
+    "@ch4p/core": "workspace:*",
+    "ethers": "^6.14.0"
   }
 }

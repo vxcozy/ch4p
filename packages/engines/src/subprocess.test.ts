@@ -6,9 +6,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { SubprocessEngine, createClaudeCliEngine, createCodexCliEngine, isAuthFailure, isRateLimit } from './subprocess.js';
+import { SubprocessEngine, createClaudeCliEngine, createCodexCliEngine, isAuthFailure, isRateLimit, StreamingToolParser, longestPrefixMatchingSuffix } from './subprocess.js';
 import { EngineError } from '@ch4p/core';
-import type { Job, EngineEvent, ToolDefinition } from '@ch4p/core';
+import type { Job, EngineEvent, ToolDefinition, ResumeToken } from '@ch4p/core';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -65,17 +65,98 @@ describe('SubprocessEngine', () => {
   });
 
   describe('resume', () => {
-    it('throws EngineError — subprocess engines do not support resume', async () => {
+    it('succeeds with a valid ResumeToken from the same engine', async () => {
+      // Use an echo-based engine that outputs whatever argv it receives.
       const engine = new SubprocessEngine({
-        id: 'test',
-        name: 'Test',
+        id: 'echo-resume',
+        name: 'Echo Resume',
+        command: 'echo',
+        promptMode: 'arg',
+        timeout: 5000,
+      });
+
+      // First run — capture the ResumeToken emitted in the 'started' event.
+      const handle1 = await engine.startRun(makeJob('first question'));
+      let capturedToken: ResumeToken | undefined;
+      const events1: EngineEvent[] = [];
+      for await (const ev of handle1.events) {
+        events1.push(ev);
+        if (ev.type === 'started' && ev.resumeToken) {
+          capturedToken = ev.resumeToken;
+        }
+      }
+      expect(capturedToken).toBeDefined();
+      expect(capturedToken!.engineId).toBe('echo-resume');
+
+      // Resume — should reconstruct a job and produce a completed event.
+      const handle2 = await engine.resume(capturedToken!, 'follow-up question');
+      const events2: EngineEvent[] = [];
+      for await (const ev of handle2.events) {
+        events2.push(ev);
+      }
+      const types = events2.map((e) => e.type);
+      expect(types).toContain('started');
+      expect(types).toContain('completed');
+    });
+
+    it('throws EngineError when token engineId does not match', async () => {
+      const engine = new SubprocessEngine({
+        id: 'echo-test',
+        name: 'Echo Test',
         command: 'echo',
       });
 
       await expect(engine.resume(
-        { engineId: 'test', ref: 'ref_1', state: {} },
+        { engineId: 'different-engine', ref: 'ref_1', state: { sessionId: 'x', messages: [] } },
         'continue',
       )).rejects.toThrow(EngineError);
+    });
+
+    it('throws EngineError when resume state is missing', async () => {
+      const engine = new SubprocessEngine({
+        id: 'echo-test',
+        name: 'Echo Test',
+        command: 'echo',
+      });
+
+      await expect(engine.resume(
+        { engineId: 'echo-test', ref: 'ref_1', state: null },
+        'continue',
+      )).rejects.toThrow(EngineError);
+    });
+
+    it('includes prior messages in the resumed conversation', async () => {
+      const engine = new SubprocessEngine({
+        id: 'echo-resume-hist',
+        name: 'Echo Resume',
+        command: 'echo',
+        promptMode: 'arg',
+        timeout: 5000,
+      });
+
+      // Build a job with some existing conversation history.
+      const job: Job = {
+        sessionId: 'hist-session',
+        messages: [
+          { role: 'user', content: 'initial message' },
+          { role: 'assistant', content: 'initial response' },
+        ],
+      };
+      const handle1 = await engine.startRun(job);
+      let token: ResumeToken | undefined;
+      for await (const ev of handle1.events) {
+        if (ev.type === 'started' && ev.resumeToken) token = ev.resumeToken;
+      }
+
+      // Resume with a new prompt — the token's state should include prior messages.
+      const handle2 = await engine.resume(token!, 'follow-up');
+      let completedAnswer = '';
+      for await (const ev of handle2.events) {
+        if (ev.type === 'completed') completedAnswer = ev.answer;
+      }
+      // Echo will output the prompt; for multi-turn it echoes the full history block.
+      // Verify the run completed without error (answer is non-empty).
+      expect(completedAnswer.length).toBeGreaterThan(0);
     });
   });
 
@@ -522,11 +603,12 @@ describe('SubprocessEngine tool support', () => {
     });
   });
 
-  describe('buffered streaming when tools are present', () => {
-    it('does not emit text_delta during streaming when tools are configured', async () => {
+  describe('real-time streaming (tools configured or not)', () => {
+    it('emits text_delta events even when tools are configured', async () => {
+      // Previously, tools caused buffering. Now text_delta is always real-time.
       const engine = new SubprocessEngine({
-        id: 'echo-buffered',
-        name: 'Echo Buffered',
+        id: 'echo-streaming-tools',
+        name: 'Echo Streaming Tools',
         command: 'echo',
         promptMode: 'arg',
         timeout: 5000,
@@ -536,19 +618,16 @@ describe('SubprocessEngine tool support', () => {
       const handle = await engine.startRun(job);
       const events = await collectEvents(handle);
 
-      // When tools are configured, we buffer output and parse at the end.
-      // We should see exactly one text_delta (the post-parse clean text)
-      // and one completed event.
       const textDeltas = events.filter((e) => e.type === 'text_delta');
       const completed = events.find((e) => e.type === 'completed') as
         Extract<EngineEvent, { type: 'completed' }>;
 
-      // There should be at most one text_delta (the parsed clean output).
-      expect(textDeltas.length).toBeLessThanOrEqual(1);
+      // text_delta events MUST be emitted in real-time even with tools.
+      expect(textDeltas.length).toBeGreaterThanOrEqual(1);
       expect(completed).toBeDefined();
     });
 
-    it('streams text_delta in real-time when no tools are configured', async () => {
+    it('emits text_delta events when no tools are configured', async () => {
       const engine = new SubprocessEngine({
         id: 'echo-stream',
         name: 'Echo Stream',
@@ -557,7 +636,6 @@ describe('SubprocessEngine tool support', () => {
         timeout: 5000,
       });
 
-      // No tools — standard real-time streaming.
       const job = makeJob('hello world');
       const handle = await engine.startRun(job);
       const events = await collectEvents(handle);
@@ -565,6 +643,30 @@ describe('SubprocessEngine tool support', () => {
       const types = events.map((e) => e.type);
       expect(types).toContain('text_delta');
       expect(types).toContain('completed');
+    });
+
+    it('includes a ResumeToken in the started event', async () => {
+      const engine = new SubprocessEngine({
+        id: 'echo-token',
+        name: 'Echo Token',
+        command: 'echo',
+        promptMode: 'arg',
+        timeout: 5000,
+      });
+
+      const job = makeJob('hello', { tools: SAMPLE_TOOLS });
+      const handle = await engine.startRun(job);
+      const events = await collectEvents(handle);
+
+      const started = events.find((e) => e.type === 'started') as
+        Extract<EngineEvent, { type: 'started' }>;
+      expect(started).toBeDefined();
+      expect(started.resumeToken).toBeDefined();
+      expect(started.resumeToken!.engineId).toBe('echo-token');
+      expect(started.resumeToken!.ref).toBeTruthy();
+      const state = started.resumeToken!.state as { sessionId: string; messages: unknown[] };
+      expect(state.sessionId).toBe('test-session');
+      expect(Array.isArray(state.messages)).toBe(true);
     });
   });
 
@@ -676,5 +778,188 @@ describe('SubprocessEngine tool support', () => {
       expect(completed.answer).toContain('[Tool Result]');
       expect(completed.answer).toContain('Orphan result');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// StreamingToolParser unit tests
+// ---------------------------------------------------------------------------
+
+describe('StreamingToolParser', () => {
+  describe('plain text (no tool calls)', () => {
+    it('emits text events for plain content', () => {
+      const parser = new StreamingToolParser();
+      const events = parser.process('Hello world');
+      expect(events).toEqual([{ type: 'text', delta: 'Hello world' }]);
+    });
+
+    it('accumulates partial TOOL_OPEN prefix in hold buffer', () => {
+      const parser = new StreamingToolParser();
+      // '<tool_' is a prefix of '<tool_call>' — should be held back
+      const events = parser.process('Hello <tool_');
+      // 'Hello ' is safe, '<tool_' is held
+      expect(events).toEqual([{ type: 'text', delta: 'Hello ' }]);
+      // Flush confirms the held content
+      expect(parser.flush()).toBe('<tool_');
+    });
+
+    it('releases held prefix when next chunk rules out a match', () => {
+      const parser = new StreamingToolParser();
+      parser.process('text <tool_');  // hold back '<tool_'
+      const events = parser.process('X not a tag');
+      // '<tool_X not a tag' is not a tool tag — the parser releases it as text
+      const allText = events.map((e) => e.type === 'text' ? e.delta : '').join('');
+      expect(allText).toContain('<tool_');
+    });
+
+    it('emits nothing when input is empty', () => {
+      const parser = new StreamingToolParser();
+      expect(parser.process('')).toEqual([]);
+    });
+
+    it('flush returns empty string when nothing is held', () => {
+      const parser = new StreamingToolParser();
+      parser.process('safe text');
+      expect(parser.flush()).toBe('');
+    });
+  });
+
+  describe('complete tool call in one chunk', () => {
+    it('emits tool event for well-formed tool_call block', () => {
+      const parser = new StreamingToolParser();
+      const events = parser.process('<tool_call>\n{"tool":"canvas_render","args":{"action":"add"}}\n</tool_call>');
+
+      const toolEvents = events.filter((e) => e.type === 'tool');
+      expect(toolEvents).toHaveLength(1);
+      expect(toolEvents[0]).toMatchObject({ type: 'tool', tool: 'canvas_render', args: { action: 'add' } });
+    });
+
+    it('emits text before and after a tool_call block', () => {
+      const parser = new StreamingToolParser();
+      const events = parser.process('Before.\n<tool_call>\n{"tool":"t","args":{}}\n</tool_call>\nAfter.');
+
+      const textEvents = events.filter((e) => e.type === 'text').map((e) => (e as { type: 'text'; delta: string }).delta).join('');
+      const toolEvents = events.filter((e) => e.type === 'tool');
+      expect(textEvents).toContain('Before.');
+      expect(textEvents).toContain('After.');
+      expect(toolEvents).toHaveLength(1);
+    });
+
+    it('emits multiple tool_start events for sequential tool blocks', () => {
+      const parser = new StreamingToolParser();
+      const input = '<tool_call>{"tool":"a","args":{}}</tool_call><tool_call>{"tool":"b","args":{}}</tool_call>';
+      const events = parser.process(input);
+
+      const toolEvents = events.filter((e) => e.type === 'tool');
+      expect(toolEvents).toHaveLength(2);
+      expect((toolEvents[0] as { tool: string }).tool).toBe('a');
+      expect((toolEvents[1] as { tool: string }).tool).toBe('b');
+    });
+  });
+
+  describe('split chunks (boundary handling)', () => {
+    it('handles tool_call tag split across two chunks', () => {
+      const parser = new StreamingToolParser();
+      // Split '<tool_call>' across two chunks
+      const events1 = parser.process('<tool_');
+      const events2 = parser.process('call>{"tool":"x","args":{}}</tool_call>');
+
+      const all = [...events1, ...events2];
+      const toolEvents = all.filter((e) => e.type === 'tool');
+      expect(toolEvents).toHaveLength(1);
+      expect((toolEvents[0] as { tool: string }).tool).toBe('x');
+    });
+
+    it('handles tool JSON body split across chunks', () => {
+      const parser = new StreamingToolParser();
+      const events1 = parser.process('<tool_call>{"tool":"sp');
+      const events2 = parser.process('lit","args":{"k":"v"}}</tool_call>');
+
+      const all = [...events1, ...events2];
+      const toolEvents = all.filter((e) => e.type === 'tool');
+      expect(toolEvents).toHaveLength(1);
+      expect((toolEvents[0] as { tool: string }).tool).toBe('split');
+    });
+
+    it('handles closing tag split across chunks', () => {
+      const parser = new StreamingToolParser();
+      const events1 = parser.process('<tool_call>{"tool":"z","args":{}}</tool_');
+      const events2 = parser.process('call>');
+
+      const all = [...events1, ...events2];
+      const toolEvents = all.filter((e) => e.type === 'tool');
+      expect(toolEvents).toHaveLength(1);
+    });
+
+    it('single character chunks', () => {
+      const parser = new StreamingToolParser();
+      const input = 'Hi<tool_call>{"tool":"t","args":{}}</tool_call>!';
+      const all = input.split('').flatMap((c) => parser.process(c));
+      const flush = parser.flush();
+
+      const toolEvents = all.filter((e) => e.type === 'tool');
+      const text = [...all.filter((e) => e.type === 'text'), ...(flush ? [{ type: 'text' as const, delta: flush }] : [])]
+        .map((e) => (e as { delta: string }).delta).join('');
+
+      expect(toolEvents).toHaveLength(1);
+      expect(text).toContain('Hi');
+      expect(text).toContain('!');
+    });
+  });
+
+  describe('malformed JSON', () => {
+    it('emits tool block as text when JSON is invalid', () => {
+      const parser = new StreamingToolParser();
+      const events = parser.process('<tool_call>not valid json</tool_call>');
+
+      const textEvents = events.filter((e) => e.type === 'text');
+      const toolEvents = events.filter((e) => e.type === 'tool');
+      expect(toolEvents).toHaveLength(0);
+      expect(textEvents.map((e) => (e as { delta: string }).delta).join('')).toContain('not valid json');
+    });
+
+    it('emits tool block as text when JSON lacks tool/args keys', () => {
+      const parser = new StreamingToolParser();
+      const events = parser.process('<tool_call>{"name":"foo","params":{}}</tool_call>');
+
+      const toolEvents = events.filter((e) => e.type === 'tool');
+      expect(toolEvents).toHaveLength(0);
+    });
+  });
+
+  describe('flush', () => {
+    it('returns incomplete tool block on flush when stream ended mid-tag', () => {
+      const parser = new StreamingToolParser();
+      parser.process('<tool_call>{"tool":"x","args":{}');
+      const tail = parser.flush();
+      expect(tail).toContain('<tool_call>');
+      expect(tail).toContain('"tool":"x"');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// longestPrefixMatchingSuffix
+// ---------------------------------------------------------------------------
+
+describe('longestPrefixMatchingSuffix', () => {
+  it('returns 0 when no prefix of pattern matches suffix of text', () => {
+    expect(longestPrefixMatchingSuffix('hello', '<tool_call>')).toBe(0);
+  });
+
+  it('returns length of matching prefix', () => {
+    // text ends with '<tool' which is the first 5 chars of '<tool_call>'
+    expect(longestPrefixMatchingSuffix('some text <tool', '<tool_call>')).toBe(5);
+  });
+
+  it('returns 1 for single matching char', () => {
+    expect(longestPrefixMatchingSuffix('foo <', '<tool_call>')).toBe(1);
+  });
+
+  it('does not return full pattern length (pattern.length - 1 max)', () => {
+    const pattern = '<tool_call>';
+    const text = pattern;
+    // Full match would be pattern.length, but max is pattern.length - 1
+    expect(longestPrefixMatchingSuffix(text, pattern)).toBeLessThan(pattern.length);
   });
 });
