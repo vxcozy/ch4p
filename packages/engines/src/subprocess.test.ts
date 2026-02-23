@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { SubprocessEngine, createClaudeCliEngine, createCodexCliEngine, isAuthFailure } from './subprocess.js';
+import { SubprocessEngine, createClaudeCliEngine, createCodexCliEngine, isAuthFailure, isRateLimit } from './subprocess.js';
 import { EngineError } from '@ch4p/core';
 import type { Job, EngineEvent, ToolDefinition } from '@ch4p/core';
 
@@ -293,6 +293,52 @@ describe('isAuthFailure', () => {
 
   it('returns false for empty strings', () => {
     expect(isAuthFailure('')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isRateLimit
+// ---------------------------------------------------------------------------
+
+describe('isRateLimit', () => {
+  it('detects "rate limit" pattern', () => {
+    expect(isRateLimit('Error: rate limit exceeded')).toBe(true);
+  });
+
+  it('detects "too many requests" pattern', () => {
+    expect(isRateLimit('429 Too Many Requests')).toBe(true);
+  });
+
+  it('detects "usage limit" pattern', () => {
+    expect(isRateLimit('You have reached your usage limit for this period.')).toBe(true);
+  });
+
+  it('detects "quota exceeded" pattern', () => {
+    expect(isRateLimit('Quota exceeded for this billing period')).toBe(true);
+  });
+
+  it('detects "try again later" pattern', () => {
+    expect(isRateLimit('Service unavailable, try again later')).toBe(true);
+  });
+
+  it('detects "limit reached" pattern', () => {
+    expect(isRateLimit('Monthly limit reached')).toBe(true);
+  });
+
+  it('is case-insensitive', () => {
+    expect(isRateLimit('RATE LIMIT EXCEEDED')).toBe(true);
+    expect(isRateLimit('QUOTA EXCEEDED')).toBe(true);
+  });
+
+  it('returns false for auth errors', () => {
+    expect(isRateLimit('Not logged in')).toBe(false);
+    expect(isRateLimit('Unauthorized')).toBe(false);
+  });
+
+  it('returns false for unrelated errors', () => {
+    expect(isRateLimit('Connection refused')).toBe(false);
+    expect(isRateLimit('File not found')).toBe(false);
+    expect(isRateLimit('')).toBe(false);
   });
 });
 

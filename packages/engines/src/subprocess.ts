@@ -58,6 +58,22 @@ export function isAuthFailure(stderr: string): boolean {
   return AUTH_FAILURE_PATTERNS.some((p) => lower.includes(p));
 }
 
+const RATE_LIMIT_PATTERNS = [
+  'rate limit',
+  'too many requests',
+  'usage limit',
+  'quota exceeded',
+  'try again later',
+  'you have exceeded',
+  'limit reached',
+];
+
+/** Check if stderr indicates a rate limit or usage quota error. */
+export function isRateLimit(stderr: string): boolean {
+  const lower = stderr.toLowerCase();
+  return RATE_LIMIT_PATTERNS.some((p) => lower.includes(p));
+}
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -276,6 +292,26 @@ export class SubprocessEngine implements IEngine {
             type: 'error',
             error: new EngineError(
               `${this.name} is not authenticated. ${hint}`,
+              this.id,
+              undefined,
+              false, // non-retryable
+            ),
+          });
+          return;
+        }
+
+        // Detect rate limit / usage quota errors.
+        if (stderr && isRateLimit(stderr)) {
+          const hint = this.id === 'claude-cli'
+            ? "You've hit your Claude usage limit. Wait for it to reset or check usage at claude.ai/settings."
+            : this.id === 'codex-cli'
+              ? "You've hit your OpenAI usage limit. Check your quota at platform.openai.com."
+              : `Rate limit reached for ${this.command}. Please wait before retrying.`;
+
+          yield emit({
+            type: 'error',
+            error: new EngineError(
+              `${this.name} rate limit reached. ${hint}`,
               this.id,
               undefined,
               false, // non-retryable

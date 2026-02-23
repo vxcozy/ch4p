@@ -10,6 +10,7 @@
  */
 
 import { existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { loadConfig, getConfigPath, getCh4pDir, configExists } from '../config.js';
 import { performAudit } from './audit.js';
 import { TEAL, RESET, BOLD, DIM, GREEN, YELLOW, RED, separator } from '../ui.js';
@@ -198,6 +199,32 @@ function checkApiKeys(): CheckResult {
   }
 }
 
+function checkSubprocessEngine(engineId: string): CheckResult {
+  const command = engineId === 'claude-cli' ? 'claude'
+    : engineId === 'codex-cli' ? 'codex'
+    : engineId;
+
+  try {
+    execSync(`${command} --version`, { timeout: 5000, stdio: 'pipe' });
+    return {
+      name: `${engineId} binary`,
+      status: 'ok',
+      message: `${command} found on PATH. Auth verified on first use.`,
+    };
+  } catch {
+    const hint = engineId === 'claude-cli'
+      ? 'Install Claude Code from https://claude.ai/download, then run /login.'
+      : engineId === 'codex-cli'
+        ? 'Install Codex CLI: npm install -g @openai/codex'
+        : `Ensure ${command} is installed and on your PATH.`;
+    return {
+      name: `${engineId} binary`,
+      status: 'fail',
+      message: `${command} not found or not responding. ${hint}`,
+    };
+  }
+}
+
 function checkSecurityAudit(): CheckResult {
   if (!configExists()) {
     return {
@@ -261,6 +288,19 @@ export async function doctor(): Promise<void> {
     checkApiKeys(),
     checkSecurityAudit(),
   ];
+
+  // When a subprocess engine is configured, verify the binary is reachable.
+  if (configExists()) {
+    try {
+      const config = loadConfig();
+      const engineDefault = config.engines?.default ?? 'native';
+      if (engineDefault === 'claude-cli' || engineDefault === 'codex-cli') {
+        checks.splice(checks.length - 1, 0, checkSubprocessEngine(engineDefault));
+      }
+    } catch {
+      // Config already validated above; skip.
+    }
+  }
 
   for (const check of checks) {
     const padName = check.name.padEnd(20, ' ');
