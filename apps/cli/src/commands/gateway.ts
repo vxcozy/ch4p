@@ -239,6 +239,20 @@ export async function gateway(args: string[]): Promise<void> {
   // Create agent router — evaluates config.routing rules per inbound message.
   const agentRouter = new AgentRouter(config);
 
+  // Warn early if routing rules reference agent names that aren't defined.
+  // Without this, mis-spelled agent names silently fall back to default.
+  if (agentRouter.hasRules()) {
+    const agents = config.routing?.agents ?? {};
+    const rules = config.routing?.rules ?? [];
+    for (const rule of rules) {
+      if (rule.agent && !agents[rule.agent]) {
+        console.warn(
+          `  ${YELLOW}⚠ Routing rule references undefined agent "${rule.agent}" — rule will be skipped.${RESET}`,
+        );
+      }
+    }
+  }
+
   // Build agent registration file for ERC-8004 service discovery.
   let agentRegistration: Record<string, unknown> | undefined;
   if (config.identity?.enabled) {

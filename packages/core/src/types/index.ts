@@ -243,8 +243,6 @@ export interface Ch4pConfig {
       systemPrompt?: string;
       /** LLM model to use (overrides agent.model). */
       model?: string;
-      /** Provider to use (overrides agent.provider). */
-      provider?: string;
       /** Maximum agent loop iterations (default: 20). */
       maxIterations?: number;
       /** Additional tools to exclude beyond the global exclusion list. */

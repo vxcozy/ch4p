@@ -589,7 +589,6 @@ Each key is an agent name. Agent configs override the defaults for matched messa
 |-------|------|---------|-------------|
 | `systemPrompt` | `string` | global prompt | Custom system prompt for this agent. |
 | `model` | `string` | `agent.model` | LLM model override. |
-| `provider` | `string` | `agent.provider` | Provider override. |
 | `maxIterations` | `number` | `20` | Max agent loop iterations. |
 | `toolExclude` | `string[]` | `[]` | Additional tool names to exclude for this agent. |
 

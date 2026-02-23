@@ -69,7 +69,9 @@ function findBinary(): string {
     const dir = script.replace(/[/\\][^/\\]+$/, '');
     const candidate = join(dir, 'index.js');
     if (existsSync(candidate)) {
-      return `node ${candidate}`;
+      // Use process.execPath (the actual Node.js binary) rather than the bare
+      // string "node" so the service file works with nvm / asdf / non-PATH installs.
+      return `${process.execPath} ${candidate}`;
     }
   }
 
@@ -92,8 +94,10 @@ function buildLaunchdPlist(binaryPath: string, ch4pDir: string, logsDir: string)
   //
   // For API keys and secrets that live in ~/.ch4p/.env, the binary's built-in
   // loadEnvFile() handles them — no need to enumerate them here.
-  const programArgs = binaryPath.startsWith('node ')
-    ? ['node', binaryPath.slice(5), 'gateway']
+  // If binaryPath contains a space it's "interpreter /path/to/script" — split it.
+  const spaceIdx = binaryPath.indexOf(' ');
+  const programArgs = spaceIdx !== -1
+    ? [binaryPath.slice(0, spaceIdx), binaryPath.slice(spaceIdx + 1), 'gateway']
     : [binaryPath, 'gateway'];
 
   const programArgsXml = programArgs
@@ -264,10 +268,10 @@ function buildSystemdUnit(binaryPath: string, ch4pDir: string, logsDir: string):
     ? `EnvironmentFile=-${envFile}\n`
     : '';
 
-  // If binaryPath starts with "node ", emit a two-part ExecStart.
-  const execStart = binaryPath.startsWith('node ')
-    ? `ExecStart=/usr/bin/env node ${binaryPath.slice(5)} gateway`
-    : `ExecStart=${binaryPath} gateway`;
+  // binaryPath is either a direct binary path or "interpreter /path/to/script".
+  // In both cases the full path is already absolute (from `which` or process.execPath),
+  // so ExecStart can reference it directly without /usr/bin/env lookup.
+  const execStart = `ExecStart=${binaryPath} gateway`;
 
   return `[Unit]
 Description=ch4p Gateway — Personal AI Assistant

@@ -348,12 +348,14 @@ export class MeshTool implements ITool {
 
       try {
         // Build messages for this sub-agent. If parent context is provided,
-        // prepend it as a prior assistant turn for background.
-        const subMessages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
-        if (task.context) {
-          subMessages.push({ role: 'assistant', content: `[Parent context]\n${task.context}` });
-        }
-        subMessages.push({ role: 'user', content: task.task });
+        // fold it into the user message — the Anthropic API requires the first
+        // message to have role: 'user'; prepending an assistant turn is invalid.
+        const taskContent = task.context
+          ? `[Context]\n${task.context}\n\n[Task]\n${task.task}`
+          : task.task;
+        const subMessages: Array<{ role: 'user'; content: string }> = [
+          { role: 'user', content: taskContent },
+        ];
 
         const handle = await targetEngine.startRun(
           {

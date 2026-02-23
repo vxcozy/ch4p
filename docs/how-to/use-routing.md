@@ -74,7 +74,6 @@ Fall back to default if no rule matched.
 |-------|------|---------|-------------|
 | `systemPrompt` | `string` | global prompt | Custom system prompt for messages routed to this agent. |
 | `model` | `string` | `agent.model` | LLM model. Useful for routing heavy tasks to Opus and casual messages to Haiku. |
-| `provider` | `string` | `agent.provider` | LLM provider override. |
 | `maxIterations` | `number` | `20` | Max agent loop iterations. Increase for deep research tasks; decrease for quick replies. |
 | `toolExclude` | `string[]` | `[]` | Tools to disable for this agent, merged with global exclusions. |
 

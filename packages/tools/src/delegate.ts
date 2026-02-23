@@ -149,12 +149,14 @@ export class DelegateTool implements ITool {
 
     try {
       // Build the message list for the sub-agent. If parent context is provided,
-      // prepend it as a prior assistant turn so the sub-agent has background.
-      const subMessages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
-      if (parentContext) {
-        subMessages.push({ role: 'assistant', content: `[Parent context]\n${parentContext}` });
-      }
-      subMessages.push({ role: 'user', content: task });
+      // fold it into the user message — the Anthropic API requires the first
+      // message to have role: 'user'; prepending an assistant turn is invalid.
+      const taskContent = parentContext
+        ? `[Context]\n${parentContext}\n\n[Task]\n${task}`
+        : task;
+      const subMessages: Array<{ role: 'user'; content: string }> = [
+        { role: 'user', content: taskContent },
+      ];
 
       const handle = await targetEngine.startRun(
         {

@@ -25,8 +25,6 @@ export interface RoutingDecision {
   systemPrompt?: string;
   /** Model override, or undefined to use config.agent.model. */
   model?: string;
-  /** Provider override, or undefined to use config.agent.provider. */
-  provider?: string;
   /** Max loop iterations for this agent (default: 20). */
   maxIterations: number;
   /** Tools to exclude, merged with global exclusions. */
@@ -130,7 +128,6 @@ export class AgentRouter {
       agentName,
       systemPrompt: agentCfg.systemPrompt ?? defaultSystemPrompt,
       model: agentCfg.model,
-      provider: agentCfg.provider,
       maxIterations: agentCfg.maxIterations ?? 20,
       toolExclude: agentCfg.toolExclude ?? [],
     };
@@ -141,7 +138,6 @@ export class AgentRouter {
       agentName: 'default',
       systemPrompt: defaultSystemPrompt,
       model: undefined,
-      provider: undefined,
       maxIterations: 20,
       toolExclude: [],
     };
