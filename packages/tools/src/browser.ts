@@ -569,7 +569,6 @@ export class BrowserTool implements ITool {
   private async doEvaluate(a: BrowserArgs): Promise<ToolResult> {
     const expression = a.expression!;
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const result = await this.page!.evaluate(expression);
 
     let output: string;

@@ -342,7 +342,7 @@ export class ContextManager {
 
     // Keep the last keepRatio of messages as-is — summarize the rest.
     const keepCount = Math.max(2, Math.floor(this.messages.length * keepRatio));
-    let splitIdx = this.messages.length - keepCount;
+    const splitIdx = this.messages.length - keepCount;
 
     // AWM: Preserve task description (first user message).
     if (this.namedStrategy?.preserveTaskDescription) {
