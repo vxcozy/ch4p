@@ -600,8 +600,8 @@ export class WhatsAppChannel implements IChannel {
     const response = await fetch(url, init);
     const data = (await response.json()) as T & { error?: { message: string; code: number } };
 
-    if ((data as any).error) {
-      const err = (data as any).error;
+    if (data.error) {
+      const err = data.error;
       throw new Error(`WhatsApp API error: ${err.message ?? 'Unknown error'} (code ${err.code})`);
     }
 

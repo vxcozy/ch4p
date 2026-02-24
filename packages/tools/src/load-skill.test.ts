@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import type { ToolContext } from '@ch4p/core';
+import type { ToolContext, ISecurityPolicy } from '@ch4p/core';
 import { LoadSkillTool } from './load-skill.js';
 import type { SkillProvider } from './load-skill.js';
 
@@ -26,7 +26,7 @@ function createToolContext(overrides: Partial<ToolContext> = {}): ToolContext {
         redacted: false,
       })),
       validateInput: vi.fn().mockReturnValue({ safe: true, threats: [] }),
-    } as any,
+    } as unknown as ISecurityPolicy,
     abortSignal: new AbortController().signal,
     onProgress: vi.fn(),
     ...overrides,

@@ -232,7 +232,9 @@ const HOMOGLYPH_MAP: ReadonlyMap<string, string> = new Map([
 
 /**
  * Zero-width and invisible Unicode characters used for obfuscation.
+ * Intentional combined/joined character sequences for security filtering.
  */
+// eslint-disable-next-line no-misleading-character-class
 const INVISIBLE_CHARS: RegExp = /[\u200B\u200C\u200D\u200E\u200F\u2060\u2061\u2062\u2063\u2064\uFEFF\u00AD\u034F\u17B4\u17B5\u180E]/g;
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 import { vi } from 'vitest';
 import { McpClientTool } from './mcp-client.js';
 import type { McpServerConfig, McpTransport } from './mcp-client.js';
-import type { ToolContext } from '@ch4p/core';
+import type { ToolContext, ISecurityPolicy } from '@ch4p/core';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -11,7 +11,7 @@ function createToolContext(overrides?: Partial<ToolContext>): ToolContext {
   return {
     sessionId: 'test-session',
     cwd: '/tmp',
-    securityPolicy: null as any,
+    securityPolicy: null as unknown as ISecurityPolicy,
     abortSignal: new AbortController().signal,
     onProgress: vi.fn(),
     ...overrides,
@@ -176,9 +176,9 @@ describe('McpClientTool properties', () => {
     expect(tool.parameters).toBeDefined();
     expect(tool.parameters.type).toBe('object');
     expect(tool.parameters.properties).toBeDefined();
-    expect((tool.parameters.properties as any).action).toBeDefined();
-    expect((tool.parameters.properties as any).tool).toBeDefined();
-    expect((tool.parameters.properties as any).args).toBeDefined();
+    expect((tool.parameters.properties as Record<string, unknown>).action).toBeDefined();
+    expect((tool.parameters.properties as Record<string, unknown>).tool).toBeDefined();
+    expect((tool.parameters.properties as Record<string, unknown>).args).toBeDefined();
   });
 });
 

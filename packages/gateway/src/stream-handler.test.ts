@@ -24,7 +24,7 @@ function createMockChannel(supportsEdit = true): IChannel & { editMessage?: ICha
       success: true,
       messageId: 'msg-001',
     })),
-    onMessage: vi.fn((_handler: (msg: any) => void) => {}),
+    onMessage: vi.fn((_handler: (msg: unknown) => void) => {}),
     isHealthy: vi.fn(async () => true),
   };
 

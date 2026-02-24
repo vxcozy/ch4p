@@ -6,7 +6,7 @@
 import { vi } from 'vitest';
 import { writeFile, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ToolContext } from '@ch4p/core';
+import type { ToolContext, ISecurityPolicy } from '@ch4p/core';
 import { SecurityError } from '@ch4p/core';
 import { FileReadTool } from './file-read.js';
 
@@ -29,7 +29,7 @@ function createToolContext(overrides: Partial<ToolContext> = {}): ToolContext {
         redacted: false,
       })),
       validateInput: vi.fn().mockReturnValue({ safe: true, threats: [] }),
-    } as any,
+    } as unknown as ISecurityPolicy,
     abortSignal: new AbortController().signal,
     onProgress: vi.fn(),
     ...overrides,
@@ -242,7 +242,7 @@ describe('FileReadTool', () => {
         securityPolicy: {
           ...createToolContext().securityPolicy,
           validatePath: vi.fn().mockReturnValue({ allowed: false, reason: 'blocked by policy' }),
-        } as any,
+        } as unknown as ISecurityPolicy,
       });
 
       await expect(tool.execute({ path: filePath }, ctx)).rejects.toThrow(SecurityError);
@@ -278,7 +278,7 @@ describe('FileReadTool', () => {
             allowed: true,
             canonicalPath: filePath,
           }),
-        } as any,
+        } as unknown as ISecurityPolicy,
       });
 
       const result = await tool.execute({ path: filePath }, ctx);

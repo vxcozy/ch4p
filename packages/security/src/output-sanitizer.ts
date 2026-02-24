@@ -35,12 +35,12 @@ const SENSITIVE_PATTERNS: readonly SensitivePattern[] = [
   },
   {
     name: 'Slack token',
-    pattern: /xoxb-[A-Za-z0-9\-]{20,}/g,
+    pattern: /xoxb-[A-Za-z0-9-]{20,}/g,
     replacement: 'xoxb-[REDACTED]',
   },
   {
     name: 'Slack user token',
-    pattern: /xoxp-[A-Za-z0-9\-]{20,}/g,
+    pattern: /xoxp-[A-Za-z0-9-]{20,}/g,
     replacement: 'xoxp-[REDACTED]',
   },
   {
@@ -123,7 +123,7 @@ const SENSITIVE_PATTERNS: readonly SensitivePattern[] = [
   },
   {
     name: 'AWS secret access key',
-    pattern: /(?<![A-Za-z0-9\/+])([A-Za-z0-9/+=]{40})(?![A-Za-z0-9\/+=])/g,
+    pattern: /(?<![A-Za-z0-9/+])([A-Za-z0-9/+=]{40})(?![A-Za-z0-9/+=])/g,
     // Only match when near AWS context -- this is handled by checking
     // adjacent text in the scan method for precision.
     replacement: '[AWS_SECRET_REDACTED]',

@@ -55,7 +55,7 @@ const {
   // Without this, promisify's generic fallback resolves with only the first
   // callback arg (a plain string), which breaks `const { stdout } = await ...`.
   const PROMISIFY_CUSTOM = Symbol.for('nodejs.util.promisify.custom');
-  (mockExecFileCb as any)[PROMISIFY_CUSTOM] = (...args: unknown[]) =>
+  (mockExecFileCb as Record<string | symbol, unknown>)[PROMISIFY_CUSTOM] = (...args: unknown[]) =>
     new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
       mockExecFileCb(
         ...(args as [string, string[]]),

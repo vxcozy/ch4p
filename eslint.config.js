@@ -36,9 +36,8 @@ export default tseslint.config(
       // and noUnusedParameters in tsconfig.json — no need to duplicate.
       '@typescript-eslint/no-unused-vars': 'off',
 
-      // ~53 uses of `as any` / `: any` across the codebase, mostly in test
-      // mocks and adapter FFI boundaries. Warn for visibility, fix over time.
-      '@typescript-eslint/no-explicit-any': 'warn',
+      // All `as any` casts eliminated — enforce to prevent regression.
+      '@typescript-eslint/no-explicit-any': 'error',
 
       // Intentional empty catch blocks are a common pattern in ch4p for
       // best-effort cleanup and non-critical startup paths.
@@ -61,16 +60,15 @@ export default tseslint.config(
       // in terminal UI code and binary message filtering.
       'no-control-regex': 'off',
 
-      // Regex patterns in security modules use defensive escaping (e.g. \/)
-      // that is technically unnecessary but safer to leave as-is.
-      'no-useless-escape': 'warn',
+      // All unnecessary regex escapes removed — enforce to prevent regression.
+      'no-useless-escape': 'error',
 
       // Unicode combined/joined character sequences in the input validator
       // are intentional for security filtering.
       'no-misleading-character-class': 'warn',
 
-      // Test mocks use `Function` type for broad callback signatures.
-      '@typescript-eslint/no-unsafe-function-type': 'warn',
+      // Unsafe `Function` type eliminated — enforce to prevent regression.
+      '@typescript-eslint/no-unsafe-function-type': 'error',
 
       // Test mock generators may not yield (they return canned results).
       'require-yield': 'off',

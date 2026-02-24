@@ -6,7 +6,7 @@
 import { vi } from 'vitest';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ToolContext } from '@ch4p/core';
+import type { ToolContext, ISecurityPolicy } from '@ch4p/core';
 import { SecurityError } from '@ch4p/core';
 import { BashTool } from './bash.js';
 
@@ -29,7 +29,7 @@ function createToolContext(overrides: Partial<ToolContext> = {}): ToolContext {
         redacted: false,
       })),
       validateInput: vi.fn().mockReturnValue({ safe: true, threats: [] }),
-    } as any,
+    } as unknown as ISecurityPolicy,
     abortSignal: new AbortController().signal,
     onProgress: vi.fn(),
     ...overrides,
@@ -204,7 +204,7 @@ describe('BashTool', () => {
             allowed: false,
             reason: 'dangerous command',
           }),
-        } as any,
+        } as unknown as ISecurityPolicy,
       });
 
       await expect(
@@ -225,7 +225,7 @@ describe('BashTool', () => {
             reason: 'directory not allowed',
           }),
           validateCommand: vi.fn().mockReturnValue({ allowed: true }),
-        } as any,
+        } as unknown as ISecurityPolicy,
       });
 
       await expect(

@@ -6,7 +6,7 @@
 import { vi } from 'vitest';
 import { readFile, mkdir, rm, writeFile as fsWriteFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ToolContext } from '@ch4p/core';
+import type { ToolContext, ISecurityPolicy } from '@ch4p/core';
 import { SecurityError } from '@ch4p/core';
 import { FileWriteTool } from './file-write.js';
 
@@ -29,7 +29,7 @@ function createToolContext(overrides: Partial<ToolContext> = {}): ToolContext {
         redacted: false,
       })),
       validateInput: vi.fn().mockReturnValue({ safe: true, threats: [] }),
-    } as any,
+    } as unknown as ISecurityPolicy,
     abortSignal: new AbortController().signal,
     onProgress: vi.fn(),
     ...overrides,
@@ -203,7 +203,7 @@ describe('FileWriteTool', () => {
             allowed: false,
             reason: 'write access denied',
           }),
-        } as any,
+        } as unknown as ISecurityPolicy,
       });
 
       await expect(

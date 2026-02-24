@@ -14,6 +14,16 @@ const ChatPanel = lazy(() =>
   import('./chat/ChatPanel').then((m) => ({ default: m.ChatPanel })),
 );
 
+// Preload tldraw chunk during idle time so canvas opens instantly.
+if (typeof window !== 'undefined') {
+  const preload = () => import('./canvas/CanvasEditor');
+  if ('requestIdleCallback' in window) {
+    requestIdleCallback(preload);
+  } else {
+    setTimeout(preload, 2000);
+  }
+}
+
 /** Extract session ID from URL params or use a default. */
 function getSessionId(): string {
   const params = new URLSearchParams(window.location.search);

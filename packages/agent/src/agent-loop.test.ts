@@ -1036,7 +1036,7 @@ describe('AgentLoop', () => {
       const originalExecute = slowTool.execute;
       (slowTool as { execute: typeof originalExecute }).execute = vi.fn().mockImplementation(
         async (args, ctx) => {
-          const result = await (originalExecute as Function).call(slowTool, args, ctx);
+          const result = await (originalExecute as (...a: unknown[]) => Promise<unknown>).call(slowTool, args, ctx);
           // After the first tool execution, push an abort.
           if (toolCallCount === 1) {
             session.getSteering().push({

@@ -366,7 +366,7 @@ export class IMessageChannel implements IChannel {
   ): Promise<{ text: string; chatIdentifier: string } | null> {
     // Validate GUID format before interpolating into SQL.
     // Apple GUIDs are UUIDs (with optional prefix like "p:0/"), hex digits, hyphens, colons, slashes.
-    if (!/^[A-Za-z0-9\-:\/]+$/.test(guid)) {
+    if (!/^[A-Za-z0-9\-:/]+$/.test(guid)) {
       return null;
     }
     const safeGuid = guid.replace(/'/g, "''");
