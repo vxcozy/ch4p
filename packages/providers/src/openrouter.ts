@@ -303,6 +303,7 @@ export class OpenRouterProvider implements IProvider {
     >();
     let usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
+    const MAX_SSE_BUFFER = 10 * 1024 * 1024; // 10 MiB — guard against runaway lines
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -313,6 +314,9 @@ export class OpenRouterProvider implements IProvider {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
+        if (buffer.length > MAX_SSE_BUFFER) {
+          throw new ProviderError('SSE stream buffer exceeded 10 MiB — aborting', this.id);
+        }
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
 

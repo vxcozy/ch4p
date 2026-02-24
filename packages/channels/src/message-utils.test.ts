@@ -63,6 +63,16 @@ describe('splitMessage', () => {
     }
   });
 
+  it('returns full text when maxLen is 0 (guard against infinite loop)', () => {
+    const text = 'hello world';
+    expect(splitMessage(text, 0)).toEqual([text]);
+  });
+
+  it('returns full text when maxLen is negative', () => {
+    const text = 'some text';
+    expect(splitMessage(text, -5)).toEqual([text]);
+  });
+
   it('realistic: Telegram 4096-char limit on a 5000-char message', () => {
     const text = ('hello world ').repeat(417); // ~5004 chars
     const chunks = splitMessage(text, 4096);
@@ -104,5 +114,28 @@ describe('truncateMessage', () => {
     const text = 'abcde'; // 5 chars
     const result = truncateMessage(text, 4); // limit 4 → 3 chars + '…'
     expect(result).toBe('abc…');
+  });
+
+  it('does not slice through a surrogate pair (emoji)', () => {
+    // '😀' is U+1F600, encoded as two UTF-16 code units (a surrogate pair).
+    const text = 'ab😀cd'; // 6 code units: a, b, \uD83D, \uDE00, c, d
+    // maxLen = 4 → slice at index 3 would cut inside the surrogate pair.
+    const result = truncateMessage(text, 4);
+    // Should back up to index 2 and append '…', producing 'ab…'.
+    expect(result).toBe('ab…');
+    // Verify no broken surrogates.
+    for (let i = 0; i < result.length; i++) {
+      const code = result.charCodeAt(i);
+      // No lone high surrogate (0xD800-0xDBFF) without following low surrogate.
+      if (code >= 0xd800 && code <= 0xdbff) {
+        const next = result.charCodeAt(i + 1);
+        expect(next).toBeGreaterThanOrEqual(0xdc00);
+        expect(next).toBeLessThanOrEqual(0xdfff);
+      }
+    }
+  });
+
+  it('returns unchanged when maxLen is 0 (guard)', () => {
+    expect(truncateMessage('hello', 0)).toBe('hello');
   });
 });

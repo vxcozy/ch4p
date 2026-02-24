@@ -236,6 +236,7 @@ export class GoogleProvider implements IProvider {
     // Parse NDJSON from the response body.
     // Gemini streams an array of JSON objects: the response starts with "[",
     // each chunk is separated by commas, and ends with "]".
+    const MAX_SSE_BUFFER = 10 * 1024 * 1024; // 10 MiB — guard against runaway content
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -246,6 +247,9 @@ export class GoogleProvider implements IProvider {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
+        if (buffer.length > MAX_SSE_BUFFER) {
+          throw new ProviderError('Stream buffer exceeded 10 MiB — aborting', this.id);
+        }
 
         // Extract complete JSON objects from the streamed array.
         // The stream format is: [ {...}, {...}, ... ]

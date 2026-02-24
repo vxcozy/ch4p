@@ -18,6 +18,7 @@
  */
 export function splitMessage(text: string, maxLen: number): string[] {
   if (!text) return [''];
+  if (maxLen < 1) return [text]; // Avoid infinite loop on bad input.
   if (text.length <= maxLen) return [text];
 
   const chunks: string[] = [];
@@ -48,8 +49,14 @@ export function splitMessage(text: string, maxLen: number): string[] {
  * The final `send()` will deliver the full content in chunks.
  */
 export function truncateMessage(text: string, maxLen: number): string {
+  if (maxLen < 1) return text; // Avoid nonsensical truncation.
   if (text.length <= maxLen) return text;
-  return text.slice(0, maxLen - 1) + '…';
+  let end = maxLen - 1;
+  // Don't slice through a UTF-16 surrogate pair (emoji, CJK extensions, etc.).
+  if (end > 0 && text.charCodeAt(end - 1) >= 0xd800 && text.charCodeAt(end - 1) <= 0xdbff) {
+    end--;
+  }
+  return text.slice(0, end) + '…';
 }
 
 /**

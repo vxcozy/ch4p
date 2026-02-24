@@ -270,6 +270,7 @@ export class BedrockProvider implements IProvider {
     // Bedrock uses the AWS event-stream binary protocol, but when accessed
     // via the REST API the response is a sequence of JSON event objects
     // framed with newlines (similar to NDJSON).
+    const MAX_SSE_BUFFER = 10 * 1024 * 1024; // 10 MiB — guard against runaway content
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -280,6 +281,9 @@ export class BedrockProvider implements IProvider {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
+        if (buffer.length > MAX_SSE_BUFFER) {
+          throw new ProviderError('Stream buffer exceeded 10 MiB — aborting', this.id);
+        }
 
         // Bedrock event-stream sends binary-framed events. Each event is
         // preceded by headers including `:event-type` and `:content-type`.

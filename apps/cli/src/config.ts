@@ -239,7 +239,14 @@ function resolveEnvVars(obj: unknown, missing?: Set<string>): unknown {
  * Deep merge `source` into `target`. Arrays are replaced, not merged.
  * Returns a new object; neither input is mutated.
  */
-function deepMerge<T extends Record<string, unknown>>(target: T, source: Record<string, unknown>): T {
+function deepMerge<T extends Record<string, unknown>>(
+  target: T,
+  source: Record<string, unknown>,
+  seen = new WeakSet<object>(),
+): T {
+  if (seen.has(source)) return target; // Circular reference guard.
+  seen.add(source);
+
   const result = { ...target } as Record<string, unknown>;
 
   for (const key of Object.keys(source)) {
@@ -257,6 +264,7 @@ function deepMerge<T extends Record<string, unknown>>(target: T, source: Record<
       result[key] = deepMerge(
         targetVal as Record<string, unknown>,
         sourceVal as Record<string, unknown>,
+        seen,
       );
     } else {
       result[key] = sourceVal;
