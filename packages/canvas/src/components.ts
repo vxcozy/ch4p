@@ -108,6 +108,8 @@ export interface ButtonComponent extends ComponentBase {
   text: string;
   variant?: 'primary' | 'secondary' | 'danger';
   disabled?: boolean;
+  /** Logical action identifier dispatched on click. Falls back to component id. */
+  actionId?: string;
 }
 
 /** Single-line or multi-line text input. */

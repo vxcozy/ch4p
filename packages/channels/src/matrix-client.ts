@@ -167,7 +167,7 @@ export class MinimalMatrixClient extends EventEmitter {
     const data = await this.api(
       'GET',
       `/_matrix/client/v3/sync?${params.toString()}`,
-    ) as SyncResponse;
+    ) as unknown as SyncResponse;
 
     this.nextBatch = data.next_batch;
 

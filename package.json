@@ -15,7 +15,7 @@
     "test": "vitest",
     "test:coverage": "vitest --coverage",
     "lint": "eslint . --ext .ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm -r --filter './packages/*' --filter './apps/web' exec tsc --noEmit",
     "bundle": "pnpm -r build && cd apps/cli && bun run build.ts",
     "clean": "pnpm -r clean && rm -rf node_modules"
   },
