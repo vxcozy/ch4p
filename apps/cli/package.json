@@ -1,6 +1,8 @@
 {
   "name": "@ch4p/cli",
   "version": "0.1.0",
+  "description": "CLI entry point for ch4p — REPL, gateway, and canvas modes",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

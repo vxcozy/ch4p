@@ -1,6 +1,8 @@
 {
   "name": "@ch4p/tools",
   "version": "0.1.0",
+  "description": "Agent tools — bash, file ops, grep, glob, web fetch/search, browser, memory, MCP",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

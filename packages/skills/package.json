@@ -1,6 +1,8 @@
 {
   "name": "@ch4p/skills",
   "version": "0.1.0",
+  "description": "Skill discovery, YAML frontmatter, and OpenClaw-compatible registry",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -1,6 +1,8 @@
 {
   "name": "@ch4p/supervisor",
   "version": "0.1.0",
+  "description": "OTP-style supervision trees and health monitoring",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

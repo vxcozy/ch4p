@@ -1,6 +1,8 @@
 {
   "name": "@ch4p/canvas",
   "version": "0.1.0",
+  "description": "A2UI components, canvas state, WebSocket protocol, and spatial tools",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

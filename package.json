@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "Personal AI assistant platform — OpenClaw's reach, Lemon's concurrency, ZeroClaw's discipline",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vxcozy/ch4p.git"
+  },
+  "homepage": "https://github.com/vxcozy/ch4p#readme",
+  "bugs": {
+    "url": "https://github.com/vxcozy/ch4p/issues"
+  },
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.29.3",

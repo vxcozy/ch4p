@@ -12,7 +12,8 @@
   <a href="#channels">Channels</a> ·
   <a href="#security">Security</a> ·
   <a href="#features">Features</a> ·
-  <a href="#documentation">Docs</a>
+  <a href="#documentation">Docs</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 <p align="center">
@@ -233,6 +234,14 @@ Full [Diataxis-style](https://diataxis.fr) docs in [`docs/`](docs/index.md):
 | **Reference** | [Interfaces](docs/reference/interfaces.md) · [Configuration](docs/reference/configuration.md) · [CLI](docs/reference/cli.md) · [Security](docs/reference/security.md) |
 | **Explanation** | [Architecture](docs/explanation/architecture.md) · [Concurrency](docs/explanation/concurrency.md) · [Security Model](docs/explanation/security-model.md) · [Memory](docs/explanation/memory.md) |
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code standards, and how to submit changes.
+
+## Security
+
+For vulnerability reporting, see [SECURITY.md](SECURITY.md). Do not open public issues for security concerns — use [GitHub's private reporting](https://github.com/vxcozy/ch4p/security/advisories/new).
+
 ## License
 
-[Apache License 2.0](LICENSE)
+[Apache License 2.0](LICENSE) · [Changelog](CHANGELOG.md)
