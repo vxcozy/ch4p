@@ -699,6 +699,14 @@ async function runRepl(config: Ch4pConfig, voiceEnabled = false): Promise<void> 
   console.log('\n' + sessionBanner(bannerInfo));
   console.log(`  ${DIM}Type ${TEAL}/help${DIM} for commands, ${TEAL}/exit${DIM} to quit.${RESET}\n`);
 
+  if (engine.name === 'Native Engine (stub)') {
+    console.log(
+      `  ${YELLOW}${BOLD}⚠  Stub engine active${RESET}\n` +
+      `  ${YELLOW}No API key is configured for "${config.agent.provider}".${RESET}\n` +
+      `  ${DIM}Responses are placeholders only. Run ${TEAL}ch4p onboard${DIM} to set up a real provider.${RESET}\n`,
+    );
+  }
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,

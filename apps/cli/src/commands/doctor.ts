@@ -161,34 +161,29 @@ function checkApiKeys(): CheckResult {
       };
     }
 
-    const keys: string[] = [];
+    // Check the configured provider's key specifically.
+    const providerName = config.agent?.provider ?? 'anthropic';
+    const providerConfig = config.providers?.[providerName] as Record<string, unknown> | undefined;
+    const apiKey = providerConfig?.['apiKey'];
+    const envKey = process.env[`${providerName.toUpperCase()}_API_KEY`];
 
-    const anthropicKey = (config.providers?.['anthropic'] as Record<string, unknown> | undefined)?.['apiKey'];
-    if (typeof anthropicKey === 'string' && anthropicKey.length > 0 && !anthropicKey.includes('${')) {
-      keys.push('Anthropic');
-    } else if (process.env['ANTHROPIC_API_KEY']) {
-      keys.push('Anthropic (env)');
-    }
+    const hasKey =
+      (typeof apiKey === 'string' && apiKey.length > 0 && !apiKey.includes('${')) ||
+      (typeof envKey === 'string' && envKey.length > 0);
 
-    const openaiKey = (config.providers?.['openai'] as Record<string, unknown> | undefined)?.['apiKey'];
-    if (typeof openaiKey === 'string' && openaiKey.length > 0 && !openaiKey.includes('${')) {
-      keys.push('OpenAI');
-    } else if (process.env['OPENAI_API_KEY']) {
-      keys.push('OpenAI (env)');
-    }
-
-    if (keys.length > 0) {
+    if (hasKey) {
       return {
         name: 'API keys',
         status: 'ok',
-        message: `Configured: ${keys.join(', ')}`,
+        message: `${providerName} key configured.`,
       };
     }
 
     return {
       name: 'API keys',
-      status: 'warn',
-      message: 'No API keys found. Set via onboard or environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY).',
+      status: 'fail',
+      message: `No API key for configured provider "${providerName}". ` +
+        `Set ${providerName.toUpperCase()}_API_KEY or run 'ch4p onboard'.`,
     };
   } catch {
     return {

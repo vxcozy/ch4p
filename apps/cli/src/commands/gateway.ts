@@ -197,6 +197,15 @@ export async function gateway(args: string[]): Promise<void> {
   // Create the engine for processing channel messages.
   const engine = createGatewayEngine(config);
 
+  if (!engine) {
+    const providerName = config.agent?.provider ?? 'unknown';
+    console.error(`\n  ${RED}No engine available.${RESET} Provider "${providerName}" has no API key.`);
+    console.error(`  ${DIM}Run ${TEAL}ch4p onboard${DIM} to configure a provider, or set the API key`);
+    console.error(`  ${DIM}in ${TEAL}~/.ch4p/.env${DIM} as ${TEAL}${providerName.toUpperCase()}_API_KEY${RESET}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
   // Create skill registry (optional) — needed before system prompt is built.
   let skillRegistry: SkillRegistry | undefined;
   try {
