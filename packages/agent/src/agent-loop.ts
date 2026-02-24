@@ -44,6 +44,7 @@ import type {
   TokenUsage,
   EngineEvent,
   Job,
+  RunHandle,
   StateSnapshot,
   VerificationResult,
 } from '@ch4p/core';
@@ -194,6 +195,7 @@ export class AgentLoop {
   };
 
   private abortController: AbortController | null = null;
+  private currentHandle: RunHandle | null = null;
   private workerPool: ToolWorkerPool;
   private ownsWorkerPool: boolean;
 
@@ -320,6 +322,7 @@ export class AgentLoop {
         let handle;
         try {
           handle = await this.engine.startRun(job, { signal });
+          this.currentHandle = handle;
           this.session.recordLLMCall();
         } catch (err) {
           const error = err instanceof Error ? err : new Error(String(err));
@@ -595,6 +598,7 @@ export class AgentLoop {
       yield { type: 'error', error };
       this.session.fail(error);
     } finally {
+      this.currentHandle = null;
       // Clean up resources.
       this.observer.onSessionEnd(
         {
@@ -641,6 +645,14 @@ export class AgentLoop {
   /** Push a live steering message into the session's queue. */
   steer(message: SteeringMessage): void {
     this.session.getSteering().push(message);
+  }
+
+  /**
+   * Forward a raw string to the engine's stdin.
+   * Used to respond to permission prompts from SubprocessEngine (e.g. claude-cli).
+   */
+  steerEngine(message: string): void {
+    this.currentHandle?.steer(message);
   }
 
   /** Get accumulated state records for external inspection. */

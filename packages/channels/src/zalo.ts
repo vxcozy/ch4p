@@ -26,6 +26,7 @@
  *   - Access token caching with auto-refresh
  */
 
+import { splitMessage } from './message-utils.js';
 import type {
   IChannel,
   ChannelConfig,
@@ -65,6 +66,7 @@ interface ZaloWebhookEvent {
 }
 
 // API endpoints.
+const ZALO_MAX_MESSAGE_LEN = 2_000;
 const OA_API_BASE = 'https://openapi.zalo.me/v3.0/oa';
 const GRAPH_API_BASE = 'https://graph.zalo.me/v2.0';
 
@@ -132,33 +134,39 @@ export class ZaloChannel implements IChannel {
 
     try {
       const token = await this.getAccessToken();
+      const chunks = splitMessage(message.text ?? '', ZALO_MAX_MESSAGE_LEN);
+      let lastId: string | undefined;
 
-      const body = {
-        recipient: { user_id: userId },
-        message: { text: message.text },
-      };
+      for (const chunk of chunks) {
+        const body = {
+          recipient: { user_id: userId },
+          message: { text: chunk },
+        };
 
-      const response = await fetch(`${OA_API_BASE}/message/cs`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'access_token': token,
-        },
-        body: JSON.stringify(body),
-      });
+        const response = await fetch(`${OA_API_BASE}/message/cs`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'access_token': token,
+          },
+          body: JSON.stringify(body),
+        });
 
-      if (!response.ok) {
-        const errText = await response.text().catch(() => '');
-        return { success: false, error: `Zalo API ${response.status}: ${errText}` };
+        if (!response.ok) {
+          const errText = await response.text().catch(() => '');
+          return { success: false, error: `Zalo API ${response.status}: ${errText}` };
+        }
+
+        const result = await response.json() as { error: number; message: string; data?: { message_id?: string } };
+
+        if (result.error !== 0) {
+          return { success: false, error: `Zalo API error ${result.error}: ${result.message}` };
+        }
+
+        lastId = result.data?.message_id ?? lastId;
       }
 
-      const result = await response.json() as { error: number; message: string; data?: { message_id?: string } };
-
-      if (result.error !== 0) {
-        return { success: false, error: `Zalo API error ${result.error}: ${result.message}` };
-      }
-
-      return { success: true, messageId: result.data?.message_id };
+      return { success: true, messageId: lastId };
     } catch (err) {
       return { success: false, error: `Zalo send failed: ${(err as Error).message}` };
     }

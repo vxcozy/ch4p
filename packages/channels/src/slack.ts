@@ -48,7 +48,10 @@ export interface SlackConfig extends ChannelConfig {
   streamMode?: 'off' | 'edit' | 'block';
 }
 
+import { splitMessage, truncateMessage } from './message-utils.js';
+
 const API_BASE = 'https://slack.com/api';
+const SLACK_MAX_MESSAGE_LEN = 4_000;
 const SLACK_EDIT_RATE_LIMIT_MS = 1_000;
 
 const SLACK_RECONNECT_BASE_MS = 1_000;
@@ -187,25 +190,32 @@ export class SlackChannel implements IChannel {
     }
 
     try {
-      const params: Record<string, unknown> = {
-        channel,
-        text: message.text,
-      };
+      const chunks = splitMessage(message.text ?? '', SLACK_MAX_MESSAGE_LEN);
+      let lastTs: string | undefined;
 
-      // Use mrkdwn formatting by default for Slack.
-      if (message.format === 'markdown' || !message.format) {
-        params.mrkdwn = true;
-      }
+      for (const chunk of chunks) {
+        const params: Record<string, unknown> = {
+          channel,
+          text: chunk,
+        };
 
-      // Thread reply.
-      if (message.replyTo) {
-        params.thread_ts = message.replyTo;
-      }
+        // Use mrkdwn formatting by default for Slack.
+        if (message.format === 'markdown' || !message.format) {
+          params.mrkdwn = true;
+        }
 
-      const result = await this.apiCall('chat.postMessage', params);
+        // Thread reply — only on first chunk.
+        if (!lastTs && message.replyTo) {
+          params.thread_ts = message.replyTo;
+        }
 
-      if (!result.ok) {
-        return { success: false, error: result.error ?? 'chat.postMessage failed' };
+        const result = await this.apiCall('chat.postMessage', params);
+
+        if (!result.ok) {
+          return { success: false, error: result.error ?? 'chat.postMessage failed' };
+        }
+
+        lastTs = result.ts as string;
       }
 
       // Send file attachments if present.
@@ -217,7 +227,7 @@ export class SlackChannel implements IChannel {
 
       return {
         success: true,
-        messageId: result.ts as string,
+        messageId: lastTs ?? '',
       };
     } catch (err) {
       return {
@@ -244,7 +254,7 @@ export class SlackChannel implements IChannel {
       const result = await this.apiCall('chat.update', {
         channel,
         ts: messageId,
-        text: message.text,
+        text: truncateMessage(message.text ?? '', SLACK_MAX_MESSAGE_LEN),
       });
       if (!result.ok) {
         return { success: false, error: result.error ?? 'chat.update failed' };

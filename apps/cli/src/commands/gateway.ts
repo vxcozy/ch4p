@@ -358,6 +358,10 @@ export async function gateway(args: string[]): Promise<void> {
   // share history (like the REPL's sharedContext).
   const conversationContexts = new Map<string, ContextManager>();
 
+  // Track in-flight agent loops per user so permission-prompt replies from the
+  // channel can be forwarded to the subprocess stdin instead of spawning a new loop.
+  const inFlightLoops = new Map<string, { loop: AgentLoop; permissionPending: boolean }>();
+
   // Create LogChannel for cron/webhook responses (logs to observer).
   const logChannel = new LogChannel({
     onResponse: (_to, msg) => {
@@ -388,7 +392,7 @@ export async function gateway(args: string[]): Promise<void> {
       handleInboundMessage(
         syntheticMsg, logChannel as unknown as IChannel, messageRouter, engine, config, observer,
         conversationContexts, agentRouter, defaultSystemPrompt,
-        memoryBackend, skillRegistry, voiceProcessor, trackInflight, workerPool,
+        memoryBackend, skillRegistry, voiceProcessor, trackInflight, workerPool, inFlightLoops,
       );
     },
   });
@@ -469,7 +473,7 @@ export async function gateway(args: string[]): Promise<void> {
           handleInboundMessage(
             msg, channel, messageRouter, engine, config, observer,
             conversationContexts, agentRouter, defaultSystemPrompt,
-            memoryBackend, skillRegistry, voiceProcessor, trackInflight, workerPool,
+            memoryBackend, skillRegistry, voiceProcessor, trackInflight, workerPool, inFlightLoops,
           );
         });
 
@@ -725,6 +729,7 @@ function handleInboundMessage(
   voiceProcessor?: VoiceProcessor,
   onInflightChange?: (delta: 1 | -1) => void,
   workerPool?: ToolWorkerPool,
+  inFlightLoops?: Map<string, { loop: AgentLoop; permissionPending: boolean }>,
 ): void {
   if (!engine) {
     // No engine available — send a polite error back.
@@ -749,6 +754,18 @@ function handleInboundMessage(
       replyTo: msg.id,
     }).catch(() => {});
     return;
+  }
+
+  // If this user has an in-flight loop waiting for a permission response,
+  // forward the message to the subprocess stdin instead of creating a new loop.
+  const userKey = `${msg.channelId ?? 'unknown'}:${msg.from.userId ?? 'anonymous'}`;
+  if (inFlightLoops) {
+    const inflight = inFlightLoops.get(userKey);
+    if (inflight?.permissionPending) {
+      inflight.loop.steerEngine(msg.text ?? '');
+      inflight.permissionPending = false;
+      return;
+    }
   }
 
   // Route the message to a session.
@@ -912,11 +929,24 @@ function handleInboundMessage(
         workerPool,
       });
 
+      // Register loop so permission-prompt replies can be routed to subprocess stdin.
+      if (inFlightLoops) {
+        inFlightLoops.set(userKey, { loop, permissionPending: false });
+      }
+
       let responseText = '';
+
+      // Pattern that indicates the subprocess is waiting for user permission input.
+      const PERM_RE = /\[y\/n\]|\[Y\/N\]|do you want to|allow this|permission required/i;
 
       for await (const event of loop.run(processedMsg.text)) {
         if (event.type === 'text') {
           responseText = event.partial;
+          // Detect permission prompts and flag the loop as waiting for user response.
+          if (inFlightLoops && PERM_RE.test(event.partial)) {
+            const entry = inFlightLoops.get(userKey);
+            if (entry) entry.permissionPending = true;
+          }
         } else if (event.type === 'complete') {
           responseText = event.answer;
         } else if (event.type === 'error') {
@@ -945,6 +975,7 @@ function handleInboundMessage(
         replyTo: msg.id,
       }).catch(() => {});
     } finally {
+      inFlightLoops?.delete(userKey);
       onInflightChange?.(-1);
     }
   })();

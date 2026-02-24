@@ -174,6 +174,8 @@ Inspired by the Agent World Model research, ch4p implements several techniques f
 - **Mesh orchestration** — swarm-style multi-agent delegation: spawn parallel sub-agents across engines, bounded concurrency, partial failure tolerance. Sub-agents accept optional parent context injection via the `context` field.
 - **Config-driven routing** — define named agents (own system prompt, model, tool exclusions) and routing rules that dispatch gateway messages to the right agent based on channel ID and/or message text regex patterns.
 - **Worker pool isolation** — heavyweight tools (`web_fetch`, `browser`) run in pooled worker threads to avoid blocking the main agent loop. The pool is created once at gateway startup (max 4 workers, 60 s timeout) and shared across all sessions.
+- **Message chunking** — long responses are automatically split at word boundaries before sending. Per-platform limits: Telegram/WhatsApp 4096, Discord 2000, Slack/Google Chat 4000, Zalo OA 2000. Live `editMessage()` streaming calls use truncation instead of splitting.
+- **Permission prompt forwarding** — when a subprocess engine (claude-cli) shows a permission prompt, the text appears in the active channel. The user's next reply is routed directly to the subprocess stdin via `steerEngine()`, allowing approval/denial without leaving the chat interface.
 - **Voice wake** — opt-in always-on microphone listening with energy-based VAD, wake word filtering, and STT transcription into the agent loop.
 
 ## Memory
@@ -215,7 +217,7 @@ corepack pnpm --filter @ch4p/core build
 - ESM-only (all imports use `.js` extension)
 - Zero required external runtime dependencies for core, security, and CLI packages (`playwright-core` is optional for browser tool)
 - `tsup` for bundling, `vitest` for testing, `vite` for web frontend (code-split with lazy loading)
-- 85 test files, 2400 tests
+- 86 test files, 2414 tests
 
 ## Configuration
 

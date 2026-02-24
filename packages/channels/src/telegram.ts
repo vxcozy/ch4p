@@ -25,6 +25,7 @@ import type {
   Attachment,
 } from '@ch4p/core';
 import { generateId } from '@ch4p/core';
+import { splitMessage, truncateMessage } from './message-utils.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,6 +47,7 @@ export interface TelegramConfig extends ChannelConfig {
 const WEBHOOK_TIMEOUT_MS = 8_000;
 
 /** Minimum interval between message edits for streaming (Telegram rate limit). */
+const TELEGRAM_MAX_MESSAGE_LEN = 4_096;
 const TELEGRAM_EDIT_RATE_LIMIT_MS = 1_000;
 
 /** Minimal Telegram API response shape. */
@@ -190,20 +192,25 @@ export class TelegramChannel implements IChannel {
       const parseMode = message.format === 'markdown' ? 'MarkdownV2' :
         message.format === 'html' ? 'HTML' : undefined;
 
-      const text = parseMode === 'MarkdownV2'
+      const rawText = parseMode === 'MarkdownV2'
         ? this.escapeMarkdownV2(message.text)
         : message.text;
 
-      const params: Record<string, unknown> = {
-        chat_id: chatId,
-        text,
-        ...(parseMode ? { parse_mode: parseMode } : {}),
-        ...(message.replyTo ? { reply_to_message_id: Number(message.replyTo) } : {}),
-        // Thread replies: send into the correct forum topic.
-        ...(to.threadId ? { message_thread_id: Number(to.threadId) } : {}),
-      };
-
-      const result = await this.apiCall<TelegramMessage>('sendMessage', params);
+      // Split long messages into chunks that fit within Telegram's 4096-char limit.
+      const chunks = splitMessage(rawText ?? '', TELEGRAM_MAX_MESSAGE_LEN);
+      let lastMessageId: string | undefined;
+      for (const chunk of chunks) {
+        const params: Record<string, unknown> = {
+          chat_id: chatId,
+          text: chunk,
+          ...(parseMode ? { parse_mode: parseMode } : {}),
+          ...(message.replyTo && !lastMessageId ? { reply_to_message_id: Number(message.replyTo) } : {}),
+          // Thread replies: send into the correct forum topic.
+          ...(to.threadId ? { message_thread_id: Number(to.threadId) } : {}),
+        };
+        const result = await this.apiCall<TelegramMessage>('sendMessage', params);
+        lastMessageId = result ? String(result.message_id) : undefined;
+      }
 
       // Send attachments if present.
       if (message.attachments?.length) {
@@ -214,7 +221,7 @@ export class TelegramChannel implements IChannel {
 
       return {
         success: true,
-        messageId: result ? String(result.message_id) : generateId(),
+        messageId: lastMessageId ?? generateId(),
       };
     } catch (err) {
       return {
@@ -245,9 +252,12 @@ export class TelegramChannel implements IChannel {
       const parseMode = message.format === 'markdown' ? 'MarkdownV2' :
         message.format === 'html' ? 'HTML' : undefined;
 
-      const text = parseMode === 'MarkdownV2'
+      const rawEditText = parseMode === 'MarkdownV2'
         ? this.escapeMarkdownV2(message.text)
         : message.text;
+
+      // Truncate to Telegram's limit; full content will be delivered via send() chunks.
+      const text = truncateMessage(rawEditText ?? '', TELEGRAM_MAX_MESSAGE_LEN);
 
       await this.apiCall('editMessageText', {
         chat_id: chatId,

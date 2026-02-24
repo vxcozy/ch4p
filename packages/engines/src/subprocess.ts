@@ -27,6 +27,7 @@ import type {
 } from '@ch4p/core';
 import { EngineError, generateId } from '@ch4p/core';
 import { spawn, type ChildProcess } from 'node:child_process';
+import type { Writable } from 'node:stream';
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -166,7 +167,10 @@ export class SubprocessEngine implements IEngine {
     // Build the prompt from the last user message.
     const prompt = this.extractPrompt(job);
 
-    const events = this.runSubprocess(prompt, ref, job, abortController, opts?.onProgress);
+    // Shared reference so steer() can write to the child's stdin after it starts.
+    const stdinRef: { stream: Writable | null } = { stream: null };
+
+    const events = this.runSubprocess(prompt, ref, job, abortController, opts?.onProgress, stdinRef);
 
     return {
       ref,
@@ -174,9 +178,10 @@ export class SubprocessEngine implements IEngine {
       cancel: async () => {
         abortController.abort(new EngineError('Run cancelled', this.id));
       },
-      steer: (_message: string) => {
-        // Subprocess engines don't support mid-run steering.
-        // The message is silently ignored.
+      steer: (message: string) => {
+        if (stdinRef.stream && !stdinRef.stream.destroyed) {
+          stdinRef.stream.write(message + '\n');
+        }
       },
     };
   }
@@ -216,6 +221,7 @@ export class SubprocessEngine implements IEngine {
     job: Job,
     abortController: AbortController,
     onProgress?: (event: EngineEvent) => void,
+    stdinRef?: { stream: Writable | null },
   ): AsyncGenerator<EngineEvent, void, undefined> {
     const emit = (event: EngineEvent): EngineEvent => {
       onProgress?.(event);
@@ -274,20 +280,24 @@ export class SubprocessEngine implements IEngine {
       });
 
       // Collect stderr concurrently to prevent pipe-buffer deadlock.
+      // Relay stderr as text_delta so permission prompts appear in the channel.
       let stderr = '';
       if (child.stderr) {
         child.stderr.on('data', (chunk: Buffer | string) => {
-          stderr += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+          const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+          stderr += text;
+          emit({ type: 'text_delta', delta: text });
         });
       }
 
-      // If stdin mode, write prompt and close. Otherwise close stdin
-      // immediately so the subprocess doesn't block waiting for input.
+      // Write prompt to stdin if using stdin mode, then keep stdin open so
+      // permission-prompt responses can be forwarded via steer().
       if (child.stdin) {
+        if (stdinRef) stdinRef.stream = child.stdin;
         if (this.promptMode === 'stdin') {
           child.stdin.write(prompt);
         }
-        child.stdin.end();
+        // Do NOT close stdin here — keep open for interactive responses.
       }
 
       let fullAnswer = '';
@@ -329,6 +339,12 @@ export class SubprocessEngine implements IEngine {
       // Wait for process exit (promise was set up before reading stdout,
       // so we never miss the 'close' event).
       const exitCode = await exitPromise;
+
+      // Close stdin now that the subprocess has exited.
+      if (stdinRef?.stream && !stdinRef.stream.destroyed) {
+        stdinRef.stream.end();
+        stdinRef.stream = null;
+      }
 
       if (exitCode !== 0 && exitCode !== null) {
         // Detect auth failures and produce an actionable, non-retryable error.

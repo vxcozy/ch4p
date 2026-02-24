@@ -24,6 +24,7 @@
  */
 
 import { createSign } from 'node:crypto';
+import { splitMessage, truncateMessage } from './message-utils.js';
 import type {
   IChannel,
   ChannelConfig,
@@ -85,6 +86,7 @@ interface ChatMessageResponse {
 // Constants
 // ---------------------------------------------------------------------------
 
+const GOOGLE_CHAT_MAX_MESSAGE_LEN = 4_000;
 const CHAT_API_BASE = 'https://chat.googleapis.com/v1';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const CHAT_SCOPE = 'https://www.googleapis.com/auth/chat.bot';
@@ -164,41 +166,48 @@ export class GoogleChatChannel implements IChannel {
       const token = await this.getAccessToken();
       const url = `${CHAT_API_BASE}/${spaceName}/messages`;
 
-      const body: Record<string, unknown> = { text: message.text };
+      const chunks = splitMessage(message.text ?? '', GOOGLE_CHAT_MAX_MESSAGE_LEN);
+      let lastId: string | undefined;
 
-      // If replying to a thread, include thread name.
-      if (to.threadId) {
-        body.thread = { name: to.threadId };
-      }
+      for (const chunk of chunks) {
+        const body: Record<string, unknown> = { text: chunk };
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
-
-      try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          const errText = await response.text().catch(() => '');
-          return { success: false, error: `Google Chat API ${response.status}: ${errText}` };
+        // If replying to a thread, include thread name.
+        if (to.threadId) {
+          body.thread = { name: to.threadId };
         }
 
-        const result = await response.json() as ChatMessageResponse;
-        if (result.error) {
-          return { success: false, error: `Google Chat API error: ${result.error.message}` };
-        }
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
-        return { success: true, messageId: result.name };
-      } finally {
-        clearTimeout(timeoutId);
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+
+          if (!response.ok) {
+            const errText = await response.text().catch(() => '');
+            return { success: false, error: `Google Chat API ${response.status}: ${errText}` };
+          }
+
+          const result = await response.json() as ChatMessageResponse;
+          if (result.error) {
+            return { success: false, error: `Google Chat API error: ${result.error.message}` };
+          }
+
+          lastId = result.name;
+        } finally {
+          clearTimeout(timeoutId);
+        }
       }
+
+      return { success: true, messageId: lastId };
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
         return { success: false, error: `Google Chat send timed out after ${API_TIMEOUT_MS}ms.` };
@@ -228,7 +237,7 @@ export class GoogleChatChannel implements IChannel {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`,
           },
-          body: JSON.stringify({ text: message.text }),
+          body: JSON.stringify({ text: truncateMessage(message.text ?? '', GOOGLE_CHAT_MAX_MESSAGE_LEN) }),
           signal: controller.signal,
         });
 

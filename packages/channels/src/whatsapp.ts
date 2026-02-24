@@ -28,6 +28,7 @@ import type {
   Attachment,
 } from '@ch4p/core';
 import { generateId } from '@ch4p/core';
+import { splitMessage, truncateMessage } from './message-utils.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -105,6 +106,9 @@ interface MediaUrlResponse {
   error?: { message: string };
 }
 
+const WA_MAX_MESSAGE_LEN = 4_096;
+const WA_EDIT_RATE_LIMIT_MS = 1_000;
+
 // ---------------------------------------------------------------------------
 // WhatsAppChannel
 // ---------------------------------------------------------------------------
@@ -170,26 +174,33 @@ export class WhatsAppChannel implements IChannel {
         }
       }
 
-      // Send the text body.
+      // Send the text body in chunks.
       if (message.text) {
-        const body = {
-          messaging_product: 'whatsapp',
-          to: recipient,
-          type: 'text' as const,
-          text: { body: message.text },
-          ...(message.replyTo ? { context: { message_id: message.replyTo } } : {}),
-        };
+        const chunks = splitMessage(message.text, WA_MAX_MESSAGE_LEN);
+        let lastId: string | undefined;
 
-        const result = await this.graphApiCall<GraphApiResponse>(
-          `${this.phoneNumberId}/messages`,
-          'POST',
-          body,
-        );
+        for (const chunk of chunks) {
+          const body = {
+            messaging_product: 'whatsapp',
+            to: recipient,
+            type: 'text' as const,
+            text: { body: chunk },
+            // Only attach reply context to the first chunk.
+            ...(!lastId && message.replyTo ? { context: { message_id: message.replyTo } } : {}),
+          };
 
-        const messageId = result?.messages?.[0]?.id;
+          const result = await this.graphApiCall<GraphApiResponse>(
+            `${this.phoneNumberId}/messages`,
+            'POST',
+            body,
+          );
+
+          lastId = result?.messages?.[0]?.id ?? lastId;
+        }
+
         return {
           success: true,
-          messageId: messageId ?? generateId(),
+          messageId: lastId ?? generateId(),
         };
       }
 
@@ -211,11 +222,11 @@ export class WhatsAppChannel implements IChannel {
     }
     const lastEdit = this.lastEditTimestamps.get(messageId);
     const now = Date.now();
-    const WA_EDIT_RATE_LIMIT_MS = 1_000;
     if (lastEdit && now - lastEdit < WA_EDIT_RATE_LIMIT_MS) {
       return { success: true, messageId };
     }
     try {
+      const safeText = truncateMessage(message.text ?? '', WA_MAX_MESSAGE_LEN);
       await this.graphApiCall<GraphApiResponse>(
         `${this.phoneNumberId}/messages`,
         'POST',
@@ -223,7 +234,7 @@ export class WhatsAppChannel implements IChannel {
           messaging_product: 'whatsapp',
           to: recipient,
           type: 'text',
-          text: { body: message.text },
+          text: { body: safeText },
           context: { message_id: messageId },
         },
       );

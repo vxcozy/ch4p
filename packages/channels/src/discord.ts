@@ -47,6 +47,9 @@ export interface DiscordConfig extends ChannelConfig {
 }
 
 /** Minimum interval between message edits for streaming (Discord rate limit). */
+import { splitMessage, truncateMessage } from './message-utils.js';
+
+const DISCORD_MAX_MESSAGE_LEN = 2_000;
 const DISCORD_EDIT_RATE_LIMIT_MS = 1_000;
 
 const DISCORD_RECONNECT_BASE_MS = 1_000;
@@ -188,24 +191,27 @@ export class DiscordChannel implements IChannel {
     }
 
     try {
-      const body: Record<string, unknown> = {
-        content: message.text,
-      };
+      const chunks = splitMessage(message.text ?? '', DISCORD_MAX_MESSAGE_LEN);
+      let lastId: string | undefined;
 
-      if (message.replyTo) {
-        body.message_reference = { message_id: message.replyTo };
+      for (const chunk of chunks) {
+        const body: Record<string, unknown> = { content: chunk };
+
+        // Only attach reply reference to the first chunk.
+        if (!lastId && message.replyTo) {
+          body.message_reference = { message_id: message.replyTo };
+        }
+
+        const result = await this.apiCall<DiscordMessage>(
+          `/channels/${channelId}/messages`,
+          'POST',
+          body,
+        );
+
+        lastId = result.id;
       }
 
-      const result = await this.apiCall<DiscordMessage>(
-        `/channels/${channelId}/messages`,
-        'POST',
-        body,
-      );
-
-      return {
-        success: true,
-        messageId: result.id,
-      };
+      return { success: true, messageId: lastId ?? '' };
     } catch (err) {
       return {
         success: false,
@@ -235,7 +241,7 @@ export class DiscordChannel implements IChannel {
       await this.apiCall<DiscordMessage>(
         `/channels/${channelId}/messages/${messageId}`,
         'PATCH',
-        { content: message.text },
+        { content: truncateMessage(message.text ?? '', DISCORD_MAX_MESSAGE_LEN) },
       );
 
       this.lastEditTimestamps.set(messageId, now);
