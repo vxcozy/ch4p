@@ -133,22 +133,22 @@ export class FilesystemScope {
     // Resolve to absolute so traversal tricks (../../) are normalized.
     const absolute = resolve(path);
 
-    // ---- 2. Blocked paths ----
-    const blockReason = this.isBlocked(absolute);
-    if (blockReason) {
-      return {
-        allowed: false,
-        reason: blockReason,
-        canonicalPath: absolute,
-      };
-    }
-
-    // ---- 3. Workspace boundary ----
+    // ---- 2. Workspace boundary ----
     const rel = relative(this.workspaceRoot, absolute);
     if (rel.startsWith('..') || resolve(this.workspaceRoot, rel) !== absolute) {
       return {
         allowed: false,
         reason: `Path "${absolute}" is outside workspace root "${this.workspaceRoot}"`,
+        canonicalPath: absolute,
+      };
+    }
+
+    // ---- 3. Blocked paths ----
+    const blockReason = this.isBlocked(absolute);
+    if (blockReason) {
+      return {
+        allowed: false,
+        reason: blockReason,
         canonicalPath: absolute,
       };
     }
@@ -189,6 +189,14 @@ export class FilesystemScope {
    */
   private isBlocked(absolute: string): string | null {
     for (const blocked of this.blockedPaths) {
+      // If the workspace itself lives under a globally blocked prefix
+      // (e.g. /tmp/project in tests), allow access within that workspace.
+      if (
+        this.workspaceRoot === blocked ||
+        this.workspaceRoot.startsWith(blocked + '/')
+      ) {
+        continue;
+      }
       // The path is blocked if it IS the blocked path or is a child of it.
       if (absolute === blocked || absolute.startsWith(blocked + '/')) {
         return `Access to "${absolute}" is blocked (matched blocked path "${blocked}")`;
@@ -196,6 +204,7 @@ export class FilesystemScope {
     }
     return null;
   }
+
 
   /**
    * Resolve symlinks and verify the real path is still inside the workspace.
