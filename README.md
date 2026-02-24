@@ -35,7 +35,7 @@ Built on four pillars:
 ## Quick Start
 
 ```bash
-npm install -g ch4p
+npm install -g @ch4p/cli
 ch4p onboard
 ch4p agent
 ```
