@@ -49,7 +49,7 @@ import type {
   VerificationResult,
 } from '@ch4p/core';
 import { EngineError, ToolError } from '@ch4p/core';
-import { sleep, backoffDelay } from '@ch4p/core';
+import { abortableSleep, backoffDelay } from '@ch4p/core';
 import { setMaxListeners } from 'node:events';
 
 import { homedir } from 'node:os';
@@ -344,8 +344,8 @@ export class AgentLoop {
             break;
           }
 
-          // Retry with backoff.
-          await sleep(backoffDelay(consecutiveErrors));
+          // Retry with backoff (abort-aware so cancellation isn't delayed).
+          await abortableSleep(backoffDelay(consecutiveErrors), signal);
           continue;
         }
 
@@ -415,7 +415,7 @@ export class AgentLoop {
             break;
           }
 
-          await sleep(backoffDelay(consecutiveErrors));
+          await abortableSleep(backoffDelay(consecutiveErrors), signal);
           continue;
         }
 
@@ -429,7 +429,7 @@ export class AgentLoop {
             done = true;
             break;
           }
-          await sleep(backoffDelay(consecutiveErrors));
+          await abortableSleep(backoffDelay(consecutiveErrors), signal);
           continue;
         }
 

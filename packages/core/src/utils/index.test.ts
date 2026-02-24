@@ -1,4 +1,4 @@
-import { generateId, sleep, backoffDelay, truncate, deepFreeze } from './index.js';
+import { generateId, sleep, abortableSleep, backoffDelay, truncate, deepFreeze } from './index.js';
 
 // ─── generateId ──────────────────────────────────────────────────────────────
 
@@ -64,6 +64,49 @@ describe('sleep', () => {
     await sleep(0);
     const elapsed = performance.now() - start;
     expect(elapsed).toBeLessThan(100);
+  });
+});
+
+// ─── abortableSleep ─────────────────────────────────────────────────────────
+
+describe('abortableSleep', () => {
+  it('resolves after the given ms when no signal', async () => {
+    const start = performance.now();
+    await abortableSleep(50);
+    const elapsed = performance.now() - start;
+    expect(elapsed).toBeGreaterThanOrEqual(40);
+  });
+
+  it('resolves immediately when signal is already aborted', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const start = performance.now();
+    await abortableSleep(5000, ac.signal);
+    const elapsed = performance.now() - start;
+    expect(elapsed).toBeLessThan(50);
+  });
+
+  it('resolves early when signal fires during sleep', async () => {
+    const ac = new AbortController();
+    const start = performance.now();
+
+    // Abort after 30ms, sleep for 5000ms.
+    setTimeout(() => ac.abort(), 30);
+    await abortableSleep(5000, ac.signal);
+
+    const elapsed = performance.now() - start;
+    // Should resolve in ~30ms, not 5000ms.
+    expect(elapsed).toBeLessThan(200);
+    expect(elapsed).toBeGreaterThanOrEqual(20);
+  });
+
+  it('cleans up abort listener after normal timer completion', async () => {
+    const ac = new AbortController();
+    await abortableSleep(10, ac.signal);
+
+    // If listeners aren't cleaned up, aborting after completion would throw
+    // or cause unexpected side effects. This should be a no-op.
+    expect(() => ac.abort()).not.toThrow();
   });
 });
 

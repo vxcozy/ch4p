@@ -18,6 +18,31 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Sleep that resolves early if an AbortSignal fires.
+ *
+ * Useful in retry loops where backoff delays should not prevent timely
+ * abort handling. Cleans up the timer and abort listener on resolution.
+ */
+export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return sleep(ms);
+  if (signal.aborted) return Promise.resolve();
+
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+
+    function onAbort() {
+      clearTimeout(timer);
+      resolve();
+    }
+
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 /** Exponential backoff with jitter */
 export function backoffDelay(attempt: number, baseMs = 1000, maxMs = 30_000): number {
   const delay = Math.min(baseMs * 2 ** attempt, maxMs);

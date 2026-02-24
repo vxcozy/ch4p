@@ -153,6 +153,7 @@ vi.mock('@ch4p/core', async (importOriginal) => {
   return {
     ...actual,
     sleep: vi.fn().mockResolvedValue(undefined),
+    abortableSleep: vi.fn().mockResolvedValue(undefined),
     backoffDelay: vi.fn().mockReturnValue(0),
   };
 });
@@ -1884,6 +1885,238 @@ describe('AgentLoop', () => {
       expect(toolMessages).toHaveLength(1);
       expect(toolMessages[0]!.content).not.toContain('sk-leaked456');
       expect(toolMessages[0]!.content).toContain('[REDACTED]');
+    });
+  });
+
+  // =========================================================================
+  // 16. Async/event-driven edge cases
+  // =========================================================================
+
+  describe('async edge cases', () => {
+    it('should abort cleanly when abort fires during retry backoff sleep', async () => {
+      // Engine always fails. We hook into the mocked abortableSleep to
+      // trigger abort on the first backoff call — simulating an external
+      // abort arriving while the loop is sleeping between retries.
+      const { abortableSleep: mockSleep } = await import('@ch4p/core');
+      const sleepMock = mockSleep as ReturnType<typeof vi.fn>;
+
+      const engine: IEngine = {
+        id: 'test-engine',
+        name: 'Test Engine',
+        startRun: vi.fn().mockRejectedValue(new Error('Transient failure')),
+        resume: vi.fn(),
+      };
+
+      const session = createSession();
+      const observer = createMockObserver();
+      const loop = new AgentLoop(session, engine, [], observer, {
+        maxRetries: 5,
+      });
+
+      let abortTriggered = false;
+      sleepMock.mockImplementation(() => {
+        if (!abortTriggered) {
+          abortTriggered = true;
+          loop.abort('User cancelled during backoff');
+        }
+        return Promise.resolve();
+      });
+
+      const events = await collectEvents(loop, 'trigger retry');
+
+      // Should abort instead of exhausting all retries.
+      const abortedEvents = events.filter((e) => e.type === 'aborted');
+      expect(abortedEvents.length).toBeGreaterThanOrEqual(1);
+
+      // Should NOT have called startRun 5 times (retries were cut short).
+      // Flow: startRun(1) → throw → abortableSleep (abort fires) → continue →
+      // while-loop top → signal.aborted check → yield aborted → return.
+      expect(engine.startRun).toHaveBeenCalledTimes(1);
+
+      // Restore default mock behavior.
+      sleepMock.mockResolvedValue(undefined);
+    });
+
+    it('should handle partial text accumulation followed by engine error event', async () => {
+      // Engine emits some text, then emits an error — simulating a mid-stream failure.
+      const engine = createMultiCallEngine([
+        [
+          { type: 'text_delta', delta: 'Partial response...' },
+          { type: 'error', error: new Error('Connection reset') },
+        ],
+        // On retry, engine succeeds.
+        [
+          { type: 'text_delta', delta: 'Complete answer' },
+          { type: 'completed', answer: 'Complete answer' },
+        ],
+      ]);
+
+      const session = createSession();
+      const observer = createMockObserver();
+      const loop = new AgentLoop(session, engine, [], observer, {
+        maxRetries: 3,
+      });
+
+      const events = await collectEvents(loop, 'Flaky request');
+
+      // Should eventually complete (after retry), not crash.
+      const completeEvents = events.filter((e) => e.type === 'complete');
+      expect(completeEvents).toHaveLength(1);
+      expect(completeEvents[0]).toMatchObject({ answer: 'Complete answer' });
+    });
+
+    it('should complete with empty answer when engine emits no text and no tools', async () => {
+      // Engine completes with empty answer, no tool calls.
+      const engine = createMockEngine([
+        { type: 'completed', answer: '', usage: { inputTokens: 5, outputTokens: 0 } },
+      ]);
+
+      const session = createSession();
+      const observer = createMockObserver();
+      const loop = new AgentLoop(session, engine, [], observer);
+
+      const events = await collectEvents(loop, 'Empty response expected');
+
+      const completeEvents = events.filter((e) => e.type === 'complete');
+      expect(completeEvents).toHaveLength(1);
+      expect(completeEvents[0]).toMatchObject({ answer: '' });
+    });
+
+    it('should handle verifier throwing without crashing the session', async () => {
+      const engine = createMockEngine([
+        { type: 'completed', answer: 'Here is the answer' },
+      ]);
+
+      const throwingVerifier: IVerifier = {
+        verify: vi.fn().mockRejectedValue(new Error('Verifier OOM')),
+        checkFormat: vi.fn().mockReturnValue({ valid: true } as FormatCheckResult),
+      };
+
+      const session = createSession();
+      const observer = createMockObserver();
+      const loop = new AgentLoop(session, engine, [], observer, {
+        verifier: throwingVerifier,
+      });
+
+      const events = await collectEvents(loop, 'Verify me');
+
+      // Session should still complete — verifier is best-effort.
+      const completeEvents = events.filter((e) => e.type === 'complete');
+      expect(completeEvents).toHaveLength(1);
+      expect(completeEvents[0]).toMatchObject({ answer: 'Here is the answer' });
+
+      // No verification event should be yielded (it threw).
+      const verifyEvents = events.filter((e) => e.type === 'verification');
+      expect(verifyEvents).toHaveLength(0);
+
+      // Observer should have been notified of the error.
+      expect(observer.onError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'Verifier OOM' }),
+        expect.objectContaining({ phase: 'verification' }),
+      );
+    });
+
+    it('should handle engine startRun throwing after one successful iteration with tools', async () => {
+      // First call: engine returns a tool call.
+      // Second call (after tool execution): engine throws.
+      const tool = createMockTool();
+      const engine: IEngine = {
+        id: 'test-engine',
+        name: 'Test Engine',
+        startRun: vi.fn()
+          .mockResolvedValueOnce({
+            ref: 'run-1',
+            events: (async function* () {
+              yield { type: 'tool_start', id: 'tc1', tool: 'test_tool', args: {} } as EngineEvent;
+            })(),
+            cancel: vi.fn().mockResolvedValue(undefined),
+            steer: vi.fn(),
+          } satisfies RunHandle)
+          .mockRejectedValueOnce(new Error('Engine crashed on retry')),
+        resume: vi.fn(),
+      };
+
+      const session = createSession();
+      const observer = createMockObserver();
+      const loop = new AgentLoop(session, engine, [tool], observer, {
+        maxRetries: 1,
+      });
+
+      const events = await collectEvents(loop, 'Tool then crash');
+
+      // Should have tool events from the first iteration, then an error.
+      const toolStartEvents = events.filter((e) => e.type === 'tool_start');
+      expect(toolStartEvents).toHaveLength(1);
+
+      const errorEvents = events.filter((e) => e.type === 'error');
+      expect(errorEvents).toHaveLength(1);
+    });
+
+    it('should not retry non-retryable EngineErrors', async () => {
+      const { EngineError: RealEngineError } = await import('@ch4p/core');
+
+      const nonRetryableError = new RealEngineError(
+        'Invalid API key',
+        'test-engine',
+        undefined,
+        false, // non-retryable
+      );
+
+      const engine: IEngine = {
+        id: 'test-engine',
+        name: 'Test Engine',
+        startRun: vi.fn().mockRejectedValue(nonRetryableError),
+        resume: vi.fn(),
+      };
+
+      const session = createSession();
+      const observer = createMockObserver();
+      const loop = new AgentLoop(session, engine, [], observer, {
+        maxRetries: 5,
+      });
+
+      const events = await collectEvents(loop, 'Fail immediately');
+
+      // Should get an error event immediately, not after 5 retries.
+      const errorEvents = events.filter((e) => e.type === 'error');
+      expect(errorEvents).toHaveLength(1);
+
+      // Engine should have been called exactly once (no retries).
+      expect(engine.startRun).toHaveBeenCalledTimes(1);
+    });
+
+    it('should yield error after maxIterations even with tool calls', async () => {
+      // Engine always requests a tool call — loop should stop after maxIterations.
+      const tool = createMockTool();
+      const engine: IEngine = {
+        id: 'test-engine',
+        name: 'Test Engine',
+        startRun: vi.fn().mockImplementation(() => Promise.resolve({
+          ref: 'run-N',
+          events: (async function* () {
+            yield { type: 'tool_start', id: `tc-${Math.random()}`, tool: 'test_tool', args: {} } as EngineEvent;
+          })(),
+          cancel: vi.fn().mockResolvedValue(undefined),
+          steer: vi.fn(),
+        } satisfies RunHandle)),
+        resume: vi.fn(),
+      };
+
+      const session = createSession();
+      const observer = createMockObserver();
+      const loop = new AgentLoop(session, engine, [tool], observer, {
+        maxIterations: 3,
+      });
+
+      const events = await collectEvents(loop, 'Infinite tool loop');
+
+      // Should have exactly 3 tool_start + 3 tool_end, then an error.
+      const toolStartEvents = events.filter((e) => e.type === 'tool_start');
+      expect(toolStartEvents).toHaveLength(3);
+
+      const errorEvents = events.filter((e) => e.type === 'error');
+      expect(errorEvents).toHaveLength(1);
+      expect((errorEvents[0] as { error: Error }).error.message).toContain('maximum iterations');
     });
   });
 });
