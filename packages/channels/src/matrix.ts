@@ -33,6 +33,7 @@ import type {
 } from '@ch4p/core';
 import { generateId } from '@ch4p/core';
 import { MinimalMatrixClient, type MatrixEvent } from './matrix-client.js';
+import { evictOldTimestamps } from './message-utils.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,6 +83,7 @@ export class MatrixChannel implements IChannel {
   private allowedUsers: Set<string> = new Set();
   private botUserId: string | null = null;
   private lastEditTimestamps = new Map<string, number>();
+  private static readonly EDIT_TS_MAX_ENTRIES = 500;
 
   // -----------------------------------------------------------------------
   // IChannel implementation
@@ -219,6 +221,7 @@ export class MatrixChannel implements IChannel {
       };
       const newEventId = await this.client.editMessage(roomId, messageId, content);
       this.lastEditTimestamps.set(messageId, now);
+      evictOldTimestamps(this.lastEditTimestamps, MatrixChannel.EDIT_TS_MAX_ENTRIES);
       return { success: true, messageId: newEventId ?? messageId };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };

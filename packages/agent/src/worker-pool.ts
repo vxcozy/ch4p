@@ -287,52 +287,7 @@ export class ToolWorkerPool extends EventEmitter {
 
     const { task, signal, onProgress, resolve, reject } = queued;
 
-    // Timeout guard.
-    managed.currentTimer = setTimeout(() => {
-      this.failedTasks++;
-      managed.busy = false;
-      if (managed.currentTimer) clearTimeout(managed.currentTimer);
-      managed.currentTimer = undefined;
-
-      // Signal the worker to abort the in-flight tool, then terminate.
-      try { managed.worker.postMessage({ type: 'abort' }); } catch { /* already dead */ }
-      managed.worker.terminate().catch(() => {});
-      this.removeWorker(managed);
-
-      reject(new Error(`Tool "${task.tool}" timed out after ${this.taskTimeoutMs}ms`));
-      this.dispatchNext();
-    }, this.taskTimeoutMs);
-
-    // Abort signal wiring.
-    let abortListener: (() => void) | undefined;
-    if (signal) {
-      abortListener = () => {
-        if (managed.currentTimer) clearTimeout(managed.currentTimer);
-        managed.currentTimer = undefined;
-        managed.busy = false;
-        this.failedTasks++;
-
-        // Signal the worker to abort, then terminate.
-        try { managed.worker.postMessage({ type: 'abort' }); } catch { /* already dead */ }
-        managed.worker.terminate().catch(() => {});
-        this.removeWorker(managed);
-
-        reject(new Error('Task aborted during execution'));
-        this.dispatchNext();
-      };
-      signal.addEventListener('abort', abortListener, { once: true });
-    }
-
-    const cleanup = () => {
-      if (managed.currentTimer) clearTimeout(managed.currentTimer);
-      managed.currentTimer = undefined;
-      managed.busy = false;
-      if (abortListener && signal) {
-        signal.removeEventListener('abort', abortListener);
-      }
-    };
-
-    // Message handler for this execution.
+    // Message handler for this execution (hoisted so timeout/abort can remove it).
     const handler = (msg: { type: string; result?: ToolResult; update?: string; message?: string }) => {
       if (msg.type === 'progress' && msg.update) {
         onProgress(msg.update);
@@ -361,6 +316,57 @@ export class ToolWorkerPool extends EventEmitter {
         });
         this.dispatchNext();
         return;
+      }
+    };
+
+    // Timeout guard.
+    managed.currentTimer = setTimeout(() => {
+      this.failedTasks++;
+      managed.busy = false;
+      if (managed.currentTimer) clearTimeout(managed.currentTimer);
+      managed.currentTimer = undefined;
+
+      // Remove message handler before terminating to prevent zombie callbacks.
+      managed.worker.removeListener('message', handler);
+
+      // Signal the worker to abort the in-flight tool, then terminate.
+      try { managed.worker.postMessage({ type: 'abort' }); } catch { /* already dead */ }
+      managed.worker.terminate().catch(() => {});
+      this.removeWorker(managed);
+
+      reject(new Error(`Tool "${task.tool}" timed out after ${this.taskTimeoutMs}ms`));
+      this.dispatchNext();
+    }, this.taskTimeoutMs);
+
+    // Abort signal wiring.
+    let abortListener: (() => void) | undefined;
+    if (signal) {
+      abortListener = () => {
+        if (managed.currentTimer) clearTimeout(managed.currentTimer);
+        managed.currentTimer = undefined;
+        managed.busy = false;
+        this.failedTasks++;
+
+        // Remove message handler before terminating to prevent zombie callbacks.
+        managed.worker.removeListener('message', handler);
+
+        // Signal the worker to abort, then terminate.
+        try { managed.worker.postMessage({ type: 'abort' }); } catch { /* already dead */ }
+        managed.worker.terminate().catch(() => {});
+        this.removeWorker(managed);
+
+        reject(new Error('Task aborted during execution'));
+        this.dispatchNext();
+      };
+      signal.addEventListener('abort', abortListener, { once: true });
+    }
+
+    const cleanup = () => {
+      if (managed.currentTimer) clearTimeout(managed.currentTimer);
+      managed.currentTimer = undefined;
+      managed.busy = false;
+      if (abortListener && signal) {
+        signal.removeEventListener('abort', abortListener);
       }
     };
 

@@ -60,6 +60,7 @@ export class FileObserver implements IObserver {
   private readonly maxBytes: number;
   private buffer: string[] = [];
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private flushing = false;
 
   constructor(opts: FileObserverOptions = {}) {
     this.filePath = expandHome(opts.filePath ?? '~/.ch4p/logs/ch4p.jsonl');
@@ -95,7 +96,8 @@ export class FileObserver implements IObserver {
   }
 
   private flushSync(): void {
-    if (this.buffer.length === 0) return;
+    if (this.buffer.length === 0 || this.flushing) return;
+    this.flushing = true;
 
     this.rotateIfNeeded();
 
@@ -107,6 +109,8 @@ export class FileObserver implements IObserver {
       chmodSync(this.filePath, 0o600);
     } catch {
       // If we cannot write, silently drop — observability must never crash the host.
+    } finally {
+      this.flushing = false;
     }
   }
 

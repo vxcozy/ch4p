@@ -47,7 +47,7 @@ export interface DiscordConfig extends ChannelConfig {
 }
 
 /** Minimum interval between message edits for streaming (Discord rate limit). */
-import { splitMessage, truncateMessage } from './message-utils.js';
+import { splitMessage, truncateMessage, evictOldTimestamps } from './message-utils.js';
 
 const DISCORD_MAX_MESSAGE_LEN = 2_000;
 const DISCORD_EDIT_RATE_LIMIT_MS = 1_000;
@@ -137,6 +137,7 @@ export class DiscordChannel implements IChannel {
   private streamMode: 'off' | 'edit' | 'block' = 'off';
   private reconnectAttempts = 0;
   private lastEditTimestamps = new Map<string, number>();
+  private static readonly EDIT_TS_MAX_ENTRIES = 500;
 
   // -----------------------------------------------------------------------
   // IChannel implementation
@@ -245,6 +246,7 @@ export class DiscordChannel implements IChannel {
       );
 
       this.lastEditTimestamps.set(messageId, now);
+      evictOldTimestamps(this.lastEditTimestamps, DiscordChannel.EDIT_TS_MAX_ENTRIES);
       return { success: true, messageId };
     } catch (err) {
       return {
@@ -356,6 +358,7 @@ export class DiscordChannel implements IChannel {
               if (!resumable) {
                 this.sessionId = null;
                 this.sequence = null;
+                this.resumeGatewayUrl = null;
               }
               this.reconnect();
               break;

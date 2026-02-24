@@ -73,10 +73,12 @@ export class VoiceActivityDetector extends EventEmitter<VADEvents> {
         this.isSpeaking = true;
         this.speechStartTime = now;
         this.speechBuffers = [];
+        // Buffer the first sample before emitting so listeners see non-empty data.
+        this.speechBuffers.push(Buffer.from(pcmBuffer));
         this.emit('speech_start');
+      } else {
+        this.speechBuffers.push(Buffer.from(pcmBuffer));
       }
-
-      this.speechBuffers.push(Buffer.from(pcmBuffer));
       this.scheduleSilenceCheck();
     } else if (this.isSpeaking) {
       // Below threshold but still in speech — keep buffering for potential

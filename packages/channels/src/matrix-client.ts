@@ -91,6 +91,7 @@ export class MinimalMatrixClient extends EventEmitter {
     this.running = false;
     this.abortController?.abort();
     this.abortController = null;
+    this.removeAllListeners();
   }
 
   /** Send a room event. Returns the event ID. */

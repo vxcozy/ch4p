@@ -102,6 +102,22 @@ export class CloudflareTunnel implements ITunnelProvider {
             startedAt: this.startedAt,
           });
         }
+
+        // Fallback: match any https URL on a Cloudflare domain not yet matched.
+        if (!resolved) {
+          const fallback = text.match(/(https:\/\/[a-z0-9-]+\.[a-z0-9.-]*cloudflare[a-z]*\.[a-z]+)/);
+          if (fallback) {
+            resolved = true;
+            this.publicUrl = fallback[1]!;
+            this.active = true;
+            this.startedAt = new Date();
+            resolve({
+              publicUrl: this.publicUrl,
+              provider: this.id,
+              startedAt: this.startedAt,
+            });
+          }
+        }
       });
 
       child.on('error', (err) => {

@@ -148,6 +148,8 @@ export class X402PayTool implements ITool {
       globalThis.crypto.getRandomValues(randomBytes);
     } else {
       // Fallback for environments without Web Crypto (should not happen in Node 22+).
+      // WARNING: Math.random() is not cryptographically secure — nonce may be predictable.
+      console.warn('x402: crypto.getRandomValues unavailable; using insecure Math.random fallback for nonce.');
       for (let i = 0; i < 32; i++) {
         randomBytes[i] = Math.floor(Math.random() * 256);
       }

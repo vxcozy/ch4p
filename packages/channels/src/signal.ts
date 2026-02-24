@@ -26,6 +26,7 @@ import type {
 } from '@ch4p/core';
 import { generateId } from '@ch4p/core';
 import { Socket } from 'node:net';
+import { evictOldTimestamps } from './message-utils.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -113,6 +114,7 @@ export class SignalChannel implements IChannel {
   private nextRequestId = 1;
   private pendingRequests: Map<number, PendingRequest> = new Map();
   private lastEditTimestamps = new Map<string, number>();
+  private static readonly EDIT_TS_MAX_ENTRIES = 500;
 
   // -----------------------------------------------------------------------
   // IChannel implementation
@@ -235,6 +237,7 @@ export class SignalChannel implements IChannel {
       }
       await this.rpcCall('editMessage', params);
       this.lastEditTimestamps.set(messageId, now);
+      evictOldTimestamps(this.lastEditTimestamps, SignalChannel.EDIT_TS_MAX_ENTRIES);
       return { success: true, messageId };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };

@@ -201,12 +201,17 @@ export function loadEnvFile(): number {
 
 /**
  * Recursively resolve ${VAR_NAME} references in config values.
- * Only string values are processed. Missing env vars resolve to empty string.
+ * Only string values are processed. Missing env vars resolve to empty string
+ * and a warning is logged so users know which variables are undefined.
  */
 function resolveEnvVars(obj: unknown): unknown {
   if (typeof obj === 'string') {
     return obj.replace(/\$\{([^}]+)\}/g, (_match, varName: string) => {
-      return process.env[varName] ?? '';
+      const value = process.env[varName];
+      if (value === undefined) {
+        console.warn(`  ⚠  Config references \${${varName}} but it is not set in environment.`);
+      }
+      return value ?? '';
     });
   }
 

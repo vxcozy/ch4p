@@ -125,7 +125,8 @@ export class Scheduler {
 
   private tick(): void {
     const now = new Date();
-    const currentMinute = now.getHours() * 60 + now.getMinutes();
+    // Use epoch-based minute to avoid DST duplicate/skip issues.
+    const currentMinute = Math.floor(Date.now() / 60_000);
 
     // Deduplicate: only fire once per calendar minute.
     if (currentMinute === this.lastTickMinute) return;

@@ -25,7 +25,7 @@ import type {
   Attachment,
 } from '@ch4p/core';
 import { generateId } from '@ch4p/core';
-import { splitMessage, truncateMessage } from './message-utils.js';
+import { splitMessage, truncateMessage, evictOldTimestamps } from './message-utils.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -109,6 +109,7 @@ export class TelegramChannel implements IChannel {
   private webhookSecret: string | null = null;
   private streamMode: 'off' | 'edit' | 'block' = 'off';
   private lastEditTimestamps = new Map<string, number>();
+  private static readonly EDIT_TS_MAX_ENTRIES = 500;
 
   // -----------------------------------------------------------------------
   // IChannel implementation
@@ -268,6 +269,7 @@ export class TelegramChannel implements IChannel {
       });
 
       this.lastEditTimestamps.set(messageId, now);
+      evictOldTimestamps(this.lastEditTimestamps, TelegramChannel.EDIT_TS_MAX_ENTRIES);
 
       return { success: true, messageId };
     } catch (err) {

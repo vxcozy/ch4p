@@ -46,9 +46,9 @@ export function loadSkill(skillDir: string): Skill | null {
   const content = readFileSync(skillPath, 'utf8');
   const { manifest, body } = parseSkillManifest(content, skillPath);
 
-  // Validate directory name matches manifest name
+  // Validate directory name matches manifest name (case-insensitive for macOS/Windows).
   const dirName = basename(skillDir);
-  if (dirName !== manifest.name) {
+  if (dirName.toLowerCase() !== manifest.name.toLowerCase()) {
     throw new SkillParseError(
       `Directory name "${dirName}" does not match manifest name "${manifest.name}"`,
       skillPath,

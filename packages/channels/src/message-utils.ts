@@ -51,3 +51,22 @@ export function truncateMessage(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
   return text.slice(0, maxLen - 1) + '…';
 }
+
+/**
+ * Evict the oldest entries from a timestamp map when it exceeds `maxEntries`.
+ *
+ * Channel adapters store `lastEditTimestamps` to rate-limit `editMessage()`.
+ * Without eviction this map grows forever in long-running gateway processes.
+ * Call this after every `.set()` — the eviction is cheap (O(n) only when
+ * the threshold is exceeded, which is rare with a 500-entry default).
+ */
+export function evictOldTimestamps(map: Map<string, number>, maxEntries: number): void {
+  if (map.size <= maxEntries) return;
+
+  // Sort by timestamp ascending, delete the oldest quarter.
+  const sorted = [...map.entries()].sort((a, b) => a[1] - b[1]);
+  const toDelete = Math.max(1, Math.floor(sorted.length / 4));
+  for (let i = 0; i < toDelete; i++) {
+    map.delete(sorted[i]![0]);
+  }
+}

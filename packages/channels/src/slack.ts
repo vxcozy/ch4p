@@ -48,7 +48,7 @@ export interface SlackConfig extends ChannelConfig {
   streamMode?: 'off' | 'edit' | 'block';
 }
 
-import { splitMessage, truncateMessage } from './message-utils.js';
+import { splitMessage, truncateMessage, evictOldTimestamps } from './message-utils.js';
 
 const API_BASE = 'https://slack.com/api';
 const SLACK_MAX_MESSAGE_LEN = 4_000;
@@ -123,6 +123,7 @@ export class SlackChannel implements IChannel {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectAttempts = 0;
   private lastEditTimestamps = new Map<string, number>();
+  private static readonly EDIT_TS_MAX_ENTRIES = 500;
 
   // -----------------------------------------------------------------------
   // IChannel implementation
@@ -260,6 +261,7 @@ export class SlackChannel implements IChannel {
         return { success: false, error: result.error ?? 'chat.update failed' };
       }
       this.lastEditTimestamps.set(messageId, now);
+      evictOldTimestamps(this.lastEditTimestamps, SlackChannel.EDIT_TS_MAX_ENTRIES);
       return { success: true, messageId };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };

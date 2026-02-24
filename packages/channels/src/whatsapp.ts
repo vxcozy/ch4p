@@ -28,7 +28,7 @@ import type {
   Attachment,
 } from '@ch4p/core';
 import { generateId } from '@ch4p/core';
-import { splitMessage, truncateMessage } from './message-utils.js';
+import { splitMessage, truncateMessage, evictOldTimestamps } from './message-utils.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -126,6 +126,7 @@ export class WhatsAppChannel implements IChannel {
   private messageHandler: ((msg: InboundMessage) => void) | null = null;
   private running = false;
   private lastEditTimestamps = new Map<string, number>();
+  private static readonly EDIT_TS_MAX_ENTRIES = 500;
 
   // -----------------------------------------------------------------------
   // IChannel implementation
@@ -239,6 +240,7 @@ export class WhatsAppChannel implements IChannel {
         },
       );
       this.lastEditTimestamps.set(messageId, now);
+      evictOldTimestamps(this.lastEditTimestamps, WhatsAppChannel.EDIT_TS_MAX_ENTRIES);
       return { success: true, messageId };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };

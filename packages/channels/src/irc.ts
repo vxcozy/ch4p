@@ -162,6 +162,18 @@ export class IrcChannel implements IChannel {
     const useSsl = cfg.ssl !== false;
 
     return new Promise<void>((resolve, reject) => {
+      let settled = false;
+
+      // Registration timeout — reject if the server never responds after TCP connect.
+      const registrationTimeout = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          this.socket?.destroy();
+          this.socket = null;
+          reject(new Error('IRC registration timeout — no WELCOME received within 30s'));
+        }
+      }, 30_000);
+
       const onConnect = () => {
         // Send registration commands.
         if (cfg.password) {
@@ -170,11 +182,15 @@ export class IrcChannel implements IChannel {
         const nick = cfg.nick ?? DEFAULT_NICK;
         this.rawSend(`NICK ${nick}`);
         this.rawSend(`USER ${nick} 0 * :ch4p bot`);
+        clearTimeout(registrationTimeout);
+        settled = true;
         resolve();
       };
 
       const onError = (err: Error) => {
-        if (!this.registered) {
+        if (!settled) {
+          settled = true;
+          clearTimeout(registrationTimeout);
           reject(new Error(`IRC connection failed: ${err.message}`));
         }
       };
