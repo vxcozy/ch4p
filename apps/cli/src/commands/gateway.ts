@@ -175,6 +175,9 @@ const MAX_CONTEXTS = 500;
 /** Reduced token budget for gateway contexts (vs full 128K default). */
 const GATEWAY_CONTEXT_MAX_TOKENS = 32_000;
 
+/** Max depth of per-user pending message queue before older messages are replaced. */
+const MAX_PENDING_PER_USER = 2;
+
 // ---------------------------------------------------------------------------
 // CLI entry point
 // ---------------------------------------------------------------------------
@@ -422,10 +425,9 @@ export async function gateway(args: string[]): Promise<void> {
   // channel can be forwarded to the subprocess stdin instead of spawning a new loop.
   const inFlightLoops = new Map<string, { loop: AgentLoop; permissionPending: boolean }>();
 
-  // Per-user pending message queue (max depth 2). When a user sends follow-ups
-  // while an agent run is active, up to 2 messages are queued and processed in
-  // order after the current run finishes. Messages beyond 2 replace the last entry.
-  const MAX_PENDING_PER_USER = 2;
+  // Per-user pending message queue (max depth MAX_PENDING_PER_USER). When a user sends
+  // follow-ups while an agent run is active, up to 2 messages are queued and processed
+  // in order after the current run finishes. Messages beyond the cap replace the last entry.
   const pendingMessages = new Map<string, Array<{ msg: InboundMessage; channel: IChannel }>>();
 
   // Map of channel names to their raw webhook handlers (Teams, Google Chat).
