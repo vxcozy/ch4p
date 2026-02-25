@@ -1,6 +1,6 @@
 {
   "name": "@ch4p/monorepo",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Personal AI assistant platform — OpenClaw's reach, Lemon's concurrency, ZeroClaw's discipline",
   "license": "Apache-2.0",
   "repository": {

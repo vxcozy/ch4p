@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-02-25
+
+### Fixed
+
+- **Eviction timer crash** — `router` was not in scope inside the eviction `setInterval`; corrected to `messageRouter`
+
 ## [0.1.1] - 2026-02-25
 
 ### Fixed
@@ -37,5 +43,6 @@ Initial public release.
 - **Daemon installer** — `ch4p install` for zero-sudo systemd (Linux) or launchd (macOS) with auto-restart
 - **Standalone binary** — `pnpm bundle` via bun compile
 
+[0.1.2]: https://github.com/ch4p-labs/ch4p/releases/tag/v0.1.2
 [0.1.1]: https://github.com/ch4p-labs/ch4p/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ch4p-labs/ch4p/releases/tag/v0.1.0

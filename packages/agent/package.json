@@ -1,6 +1,6 @@
 {
   "name": "@ch4p/agent",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Agent runtime — session management, context, steering, and worker pool",
   "license": "Apache-2.0",
   "type": "module",

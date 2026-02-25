@@ -1,6 +1,6 @@
 {
   "name": "@ch4p/channels",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "16 messaging channel adapters implementing IChannel",
   "license": "Apache-2.0",
   "type": "module",
