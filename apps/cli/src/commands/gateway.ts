@@ -668,7 +668,7 @@ export async function gateway(args: string[]): Promise<void> {
 
     // Evict idle sessions and stale routes.
     sessionManager.evictIdle(CONTEXT_IDLE_MS);
-    router.evictStale();
+    messageRouter.evictStale();
   }, 5 * 60_000);
 
   // Keep the process alive until interrupted.
