@@ -126,4 +126,34 @@ describe('MessageRouter', () => {
       expect(r2?.sessionId).not.toBe(r1?.sessionId);
     });
   });
+
+  describe('evictStale', () => {
+    it('removes routes whose sessions have been ended', () => {
+      const { router, sessionManager } = makeRouter();
+      const r1 = router.route(makeMsg({ userId: 'user-1' }));
+      const r2 = router.route(makeMsg({ userId: 'user-2' }));
+      expect(r1).not.toBeNull();
+      expect(r2).not.toBeNull();
+
+      // End user-1's session
+      sessionManager.endSession(r1!.sessionId);
+
+      const evicted = router.evictStale();
+      expect(evicted).toBe(1);
+
+      // user-1 gets a new session on next route
+      const r3 = router.route(makeMsg({ userId: 'user-1' }));
+      expect(r3?.sessionId).not.toBe(r1?.sessionId);
+
+      // user-2 still has their original session
+      const r4 = router.route(makeMsg({ userId: 'user-2' }));
+      expect(r4?.sessionId).toBe(r2?.sessionId);
+    });
+
+    it('returns 0 when no routes are stale', () => {
+      const { router } = makeRouter();
+      router.route(makeMsg({ userId: 'user-1' }));
+      expect(router.evictStale()).toBe(0);
+    });
+  });
 });

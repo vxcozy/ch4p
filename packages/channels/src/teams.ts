@@ -81,6 +81,8 @@ export class TeamsChannel implements IChannel {
   private tokenExpiry = 0;
 
   // Service URL → conversation mappings for outbound messages.
+  // Capped to prevent unbounded growth in high-traffic bots.
+  private static readonly MAX_SERVICE_URLS = 10_000;
   private serviceUrls = new Map<string, string>();
 
   // ---------------------------------------------------------------------------
@@ -224,9 +226,14 @@ export class TeamsChannel implements IChannel {
   handleIncomingActivity(activity: Activity): void {
     if (!this.config || !this.messageHandler) return;
 
-    // Cache the service URL for this conversation.
+    // Cache the service URL for this conversation (capped to prevent unbounded growth).
     if (activity.serviceUrl && activity.conversation?.id) {
       this.serviceUrls.set(activity.conversation.id, activity.serviceUrl);
+      if (this.serviceUrls.size > TeamsChannel.MAX_SERVICE_URLS) {
+        // Evict oldest entry (Maps iterate in insertion order).
+        const oldest = this.serviceUrls.keys().next().value;
+        if (oldest !== undefined) this.serviceUrls.delete(oldest);
+      }
     }
 
     // Only process message activities.

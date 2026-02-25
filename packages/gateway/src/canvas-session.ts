@@ -13,6 +13,7 @@ export interface CanvasSessionEntry {
   canvasState: CanvasState;
   canvasChannel: CanvasChannel;
   bridge: WebSocketBridge | null;
+  lastActiveAt: number;
 }
 
 export class CanvasSessionManager {
@@ -22,7 +23,7 @@ export class CanvasSessionManager {
   createCanvasSession(sessionId: string, maxComponents?: number): CanvasSessionEntry {
     const canvasState = new CanvasState(maxComponents);
     const canvasChannel = new CanvasChannel();
-    const entry: CanvasSessionEntry = { canvasState, canvasChannel, bridge: null };
+    const entry: CanvasSessionEntry = { canvasState, canvasChannel, bridge: null, lastActiveAt: Date.now() };
     this.sessions.set(sessionId, entry);
     return entry;
   }
@@ -47,6 +48,15 @@ export class CanvasSessionManager {
     const entry = this.sessions.get(sessionId);
     if (entry) {
       entry.bridge = bridge;
+      entry.lastActiveAt = Date.now();
+    }
+  }
+
+  /** Touch a session's lastActiveAt timestamp. */
+  touchSession(sessionId: string): void {
+    const entry = this.sessions.get(sessionId);
+    if (entry) {
+      entry.lastActiveAt = Date.now();
     }
   }
 
@@ -75,5 +85,21 @@ export class CanvasSessionManager {
     for (const sessionId of this.sessions.keys()) {
       this.endCanvasSession(sessionId);
     }
+  }
+
+  /**
+   * Evict canvas sessions idle longer than `maxIdleMs`.
+   * Returns the number of sessions evicted.
+   */
+  evictIdle(maxIdleMs: number): number {
+    const cutoff = Date.now() - maxIdleMs;
+    let evicted = 0;
+    for (const [sessionId, entry] of this.sessions) {
+      if (entry.lastActiveAt < cutoff) {
+        this.endCanvasSession(sessionId);
+        evicted++;
+      }
+    }
+    return evicted;
   }
 }

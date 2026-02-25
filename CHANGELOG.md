@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-02-25
+
+### Fixed
+
+- **Gateway memory leak** — conversation contexts, sessions, and routes now evict after 1 hour of inactivity, preventing V8 heap OOM crashes during long-running gateway operation
+- **Canvas session leak** — CanvasSessionManager tracks `lastActiveAt` and evicts idle sessions
+- **Teams serviceUrls unbounded growth** — capped at 10,000 entries with FIFO eviction
+
 ## [0.1.0] - 2026-02-24
 
 Initial public release.
@@ -29,4 +37,5 @@ Initial public release.
 - **Daemon installer** — `ch4p install` for zero-sudo systemd (Linux) or launchd (macOS) with auto-restart
 - **Standalone binary** — `pnpm bundle` via bun compile
 
+[0.1.1]: https://github.com/ch4p-labs/ch4p/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ch4p-labs/ch4p/releases/tag/v0.1.0

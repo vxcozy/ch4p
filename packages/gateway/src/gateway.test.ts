@@ -12,6 +12,7 @@ import { SessionManager } from './session-manager.js';
 import { MessageRouter } from './router.js';
 import { PairingManager } from './pairing.js';
 import { GatewayServer } from './server.js';
+import { CanvasSessionManager } from './canvas-session.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -123,6 +124,31 @@ describe('SessionManager', () => {
 
   it('should handle touching a nonexistent session gracefully', () => {
     expect(() => manager.touchSession('ghost')).not.toThrow();
+  });
+
+  it('should evict sessions idle longer than maxIdleMs', () => {
+    const config1 = makeSessionConfig();
+    const config2 = makeSessionConfig();
+    manager.createSession(config1);
+    manager.createSession(config2);
+
+    // Backdate session1 to 2 hours ago.
+    const session1 = manager.getSession(config1.sessionId)!;
+    session1.lastActiveAt = new Date(Date.now() - 2 * 60 * 60_000);
+
+    const evicted = manager.evictIdle(60 * 60_000); // 1 hour
+    expect(evicted).toBe(1);
+    expect(manager.getSession(config1.sessionId)).toBeUndefined();
+    expect(manager.getSession(config2.sessionId)).toBeDefined();
+  });
+
+  it('should evict nothing when all sessions are recent', () => {
+    manager.createSession(makeSessionConfig());
+    manager.createSession(makeSessionConfig());
+
+    const evicted = manager.evictIdle(60 * 60_000);
+    expect(evicted).toBe(0);
+    expect(manager.listSessions()).toHaveLength(2);
   });
 });
 
@@ -942,5 +968,49 @@ describe('GatewayServer lifecycle', () => {
     expect(addr).not.toBeNull();
     expect(addr!.port).toBeGreaterThan(0);
     await server.stop();
+  });
+});
+
+// ===========================================================================
+// CanvasSessionManager
+// ===========================================================================
+
+describe('CanvasSessionManager', () => {
+  it('should evict idle canvas sessions', () => {
+    const mgr = new CanvasSessionManager();
+    mgr.createCanvasSession('session-1');
+    mgr.createCanvasSession('session-2');
+
+    // Backdate session-1 to 2 hours ago.
+    const entry1 = mgr.getSession('session-1')!;
+    entry1.lastActiveAt = Date.now() - 2 * 60 * 60_000;
+
+    const evicted = mgr.evictIdle(60 * 60_000); // 1 hour
+    expect(evicted).toBe(1);
+    expect(mgr.getSession('session-1')).toBeUndefined();
+    expect(mgr.getSession('session-2')).toBeDefined();
+  });
+
+  it('should evict nothing when all sessions are recent', () => {
+    const mgr = new CanvasSessionManager();
+    mgr.createCanvasSession('session-1');
+    mgr.createCanvasSession('session-2');
+
+    const evicted = mgr.evictIdle(60 * 60_000);
+    expect(evicted).toBe(0);
+    expect(mgr.listSessionIds()).toHaveLength(2);
+  });
+
+  it('should update lastActiveAt on setBridge', () => {
+    const mgr = new CanvasSessionManager();
+    mgr.createCanvasSession('session-1');
+
+    const entry = mgr.getSession('session-1')!;
+    const before = entry.lastActiveAt;
+
+    // Small delay to ensure time difference.
+    entry.lastActiveAt = before - 1000; // Backdate slightly
+    mgr.setBridge('session-1', { stop: () => {} } as never);
+    expect(mgr.getSession('session-1')!.lastActiveAt).toBeGreaterThan(before - 1000);
   });
 });

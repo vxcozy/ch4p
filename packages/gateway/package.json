@@ -1,6 +1,6 @@
 {
   "name": "@ch4p/gateway",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "HTTP server, session routing, WebSocket bridge, cron, and webhooks",
   "license": "Apache-2.0",
   "type": "module",

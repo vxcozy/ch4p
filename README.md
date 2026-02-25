@@ -20,7 +20,8 @@
   <img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="Apache 2.0" />
   <img src="https://img.shields.io/badge/node-%E2%89%A522-brightgreen" alt="Node ≥22" />
   <img src="https://img.shields.io/badge/TypeScript-strict-blue" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/tests-2449-brightgreen" alt="Tests" />
+  <a href="https://www.npmjs.com/package/@ch4p/cli"><img src="https://img.shields.io/npm/v/@ch4p/cli" alt="npm version" /></a>
+  <img src="https://img.shields.io/badge/tests-2457-brightgreen" alt="Tests" />
 </p>
 
 ---
@@ -188,7 +189,7 @@ corepack pnpm --filter @ch4p/core build   # Build single package
 - TypeScript strict mode, ES2023 target, NodeNext module resolution
 - ESM-only (all imports use `.js` extension)
 - Zero required external runtime dependencies for core, security, and CLI
-- 86 test files, 2449 tests, 0 vulnerabilities
+- 86 test files, 2457 tests, 0 vulnerabilities
 
 ## Configuration
 

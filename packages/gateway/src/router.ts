@@ -71,6 +71,21 @@ export class MessageRouter {
     return { sessionId, config: state.config };
   }
 
+  /**
+   * Evict route entries whose sessions no longer exist in the SessionManager.
+   * Returns the number of stale routes removed.
+   */
+  evictStale(): number {
+    let evicted = 0;
+    for (const [key, sessionId] of this.routeMap) {
+      if (!this.sessionManager.getSession(sessionId)) {
+        this.routeMap.delete(key);
+        evicted++;
+      }
+    }
+    return evicted;
+  }
+
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------

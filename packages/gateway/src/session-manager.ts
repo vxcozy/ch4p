@@ -59,4 +59,20 @@ export class SessionManager {
       session.status = 'active';
     }
   }
+
+  /**
+   * Evict sessions that have been idle longer than `maxIdleMs`.
+   * Returns the number of sessions evicted.
+   */
+  evictIdle(maxIdleMs: number): number {
+    const cutoff = Date.now() - maxIdleMs;
+    let evicted = 0;
+    for (const [id, session] of this.sessions) {
+      if (session.lastActiveAt.getTime() < cutoff) {
+        this.sessions.delete(id);
+        evicted++;
+      }
+    }
+    return evicted;
+  }
 }

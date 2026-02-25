@@ -379,7 +379,8 @@ export async function gateway(args: string[]): Promise<void> {
 
   // Per-user conversation context so messages within the same channel+user
   // share history (like the REPL's sharedContext).
-  const conversationContexts = new Map<string, ContextManager>();
+  // Each entry tracks lastActiveAt for idle eviction.
+  const conversationContexts = new Map<string, { ctx: ContextManager; lastActiveAt: number }>();
 
   // Track in-flight agent loops per user so permission-prompt replies from the
   // channel can be forwarded to the subprocess stdin instead of spawning a new loop.
@@ -653,11 +654,21 @@ export async function gateway(args: string[]): Promise<void> {
   console.log(`  ${DIM}Press Ctrl+C to stop.${RESET}\n`);
 
   // Periodic eviction of stale entries from unbounded maps (every 5 minutes).
+  const CONTEXT_IDLE_MS = 60 * 60_000; // 1 hour
   const evictionTimer = setInterval(() => {
     gatewayRateLimiter.evictStale();
+
     // Evict conversation contexts inactive for more than 1 hour.
-    // (ContextManager doesn't track lastActive, so we skip for now —
-    //  the rate limiter is the main leak vector.)
+    const now = Date.now();
+    for (const [key, entry] of conversationContexts) {
+      if (now - entry.lastActiveAt > CONTEXT_IDLE_MS) {
+        conversationContexts.delete(key);
+      }
+    }
+
+    // Evict idle sessions and stale routes.
+    sessionManager.evictIdle(CONTEXT_IDLE_MS);
+    router.evictStale();
   }, 5 * 60_000);
 
   // Keep the process alive until interrupted.
@@ -875,16 +886,20 @@ function handleInboundMessage(
         : groupId
           ? `${msg.channelId ?? ''}:group:${groupId}:user:${userId ?? 'anonymous'}`
           : `${msg.channelId ?? ''}:${userId ?? 'anonymous'}`;
-      let sharedContext = conversationContexts.get(contextKey);
-      if (!sharedContext) {
-        sharedContext = new ContextManager();
+      let contextEntry = conversationContexts.get(contextKey);
+      if (!contextEntry) {
+        const ctx = new ContextManager();
         // Use the routed system prompt (may be agent-specific or the default).
         const initPrompt = routing.systemPrompt
           ?? routeResult.config.systemPrompt
           ?? defaultSystemPrompt;
-        sharedContext.setSystemPrompt(initPrompt);
-        conversationContexts.set(contextKey, sharedContext);
+        ctx.setSystemPrompt(initPrompt);
+        contextEntry = { ctx, lastActiveAt: Date.now() };
+        conversationContexts.set(contextKey, contextEntry);
+      } else {
+        contextEntry.lastActiveAt = Date.now();
       }
+      const sharedContext = contextEntry.ctx;
 
       // Build routed session config.
       const routedSessionConfig = {
