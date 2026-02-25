@@ -453,7 +453,7 @@ export async function gateway(args: string[]): Promise<void> {
       handleInboundMessage(
         syntheticMsg, logChannel as unknown as IChannel, messageRouter, engine, config, observer,
         conversationContexts, agentRouter, defaultSystemPrompt,
-        memoryBackend, skillRegistry, voiceProcessor, trackInflight, workerPool, inFlightLoops,
+        memoryBackend, skillRegistry, voiceProcessor, trackInflight, workerPool, inFlightLoops, sharedVerifier,
       );
     },
     onRawWebhook: (name, body) => {
@@ -549,7 +549,7 @@ export async function gateway(args: string[]): Promise<void> {
           handleInboundMessage(
             msg, channel, messageRouter, engine, config, observer,
             conversationContexts, agentRouter, defaultSystemPrompt,
-            memoryBackend, skillRegistry, voiceProcessor, trackInflight, workerPool, inFlightLoops,
+            memoryBackend, skillRegistry, voiceProcessor, trackInflight, workerPool, inFlightLoops, sharedVerifier,
           );
         });
 
@@ -655,7 +655,7 @@ export async function gateway(args: string[]): Promise<void> {
           handleInboundMessage(
             syntheticMsg, logChannel as unknown as IChannel, messageRouter, engine, config, observer,
             conversationContexts, agentRouter, defaultSystemPrompt,
-            memoryBackend, skillRegistry, voiceProcessor, trackInflight, workerPool, inFlightLoops,
+            memoryBackend, skillRegistry, voiceProcessor, trackInflight, workerPool, inFlightLoops, sharedVerifier,
           );
         },
       });
@@ -864,6 +864,7 @@ function handleInboundMessage(
   onInflightChange?: (delta: 1 | -1) => void,
   workerPool?: ToolWorkerPool,
   inFlightLoops?: Map<string, { loop: AgentLoop; permissionPending: boolean }>,
+  sharedVerifier?: FormatVerifier | LLMVerifier,
 ): void {
   if (!engine) {
     // No engine available — send a polite error back.
