@@ -296,6 +296,114 @@ describe('createX402Middleware — valid payment', () => {
 });
 
 // ---------------------------------------------------------------------------
+// createX402Middleware — per-route pricing
+// ---------------------------------------------------------------------------
+
+describe('createX402Middleware — per-route pricing', () => {
+  const ROUTE_CONFIG: X402Config = {
+    enabled: true,
+    server: {
+      payTo: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+      amount: '1000000',   // global: 1 USDC
+      description: 'Global description',
+      protectedPaths: ['/sessions', '/sessions/*', '/webhooks/*'],
+      routes: [
+        { path: '/sessions',    amount: '500000',  description: 'Session route' },
+        { path: '/sessions/*',  amount: '250000' },
+        { path: '/webhooks/*',  amount: '2000000', description: 'Webhook route' },
+      ],
+    },
+  };
+
+  it('route-specific amount overrides global amount', async () => {
+    const handler = createX402Middleware(ROUTE_CONFIG)!;
+    const res = makeRes();
+    await handler(makeReq('/sessions'), res as unknown as ServerResponse);
+    expect(res.statusCode).toBe(402);
+    const body = JSON.parse(res.body);
+    expect(body.accepts[0].maxAmountRequired).toBe('500000');
+  });
+
+  it('route-specific description overrides global description', async () => {
+    const handler = createX402Middleware(ROUTE_CONFIG)!;
+    const res = makeRes();
+    await handler(makeReq('/sessions'), res as unknown as ServerResponse);
+    const body = JSON.parse(res.body);
+    expect(body.accepts[0].description).toBe('Session route');
+  });
+
+  it('wildcard route matches sub-path with its amount', async () => {
+    const handler = createX402Middleware(ROUTE_CONFIG)!;
+    const res = makeRes();
+    await handler(makeReq('/sessions/abc'), res as unknown as ServerResponse);
+    const body = JSON.parse(res.body);
+    expect(body.accepts[0].maxAmountRequired).toBe('250000');
+  });
+
+  it('falls back to global description when route has none', async () => {
+    const handler = createX402Middleware(ROUTE_CONFIG)!;
+    const res = makeRes();
+    await handler(makeReq('/sessions/abc'), res as unknown as ServerResponse);
+    const body = JSON.parse(res.body);
+    expect(body.accepts[0].description).toBe('Global description');
+  });
+
+  it('path not in routes falls back to global amount', async () => {
+    const cfg: X402Config = {
+      enabled: true,
+      server: {
+        payTo: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+        amount: '1000000',
+        protectedPaths: ['/other'],
+        routes: [{ path: '/sessions', amount: '500000' }],
+      },
+    };
+    const handler = createX402Middleware(cfg)!;
+    const res = makeRes();
+    await handler(makeReq('/other'), res as unknown as ServerResponse);
+    const body = JSON.parse(res.body);
+    expect(body.accepts[0].maxAmountRequired).toBe('1000000');
+  });
+
+  it('routes: [] (empty) falls back to global amount', async () => {
+    const cfg: X402Config = {
+      enabled: true,
+      server: {
+        payTo: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+        amount: '1000000',
+        protectedPaths: ['/sessions'],
+        routes: [],
+      },
+    };
+    const handler = createX402Middleware(cfg)!;
+    const res = makeRes();
+    await handler(makeReq('/sessions'), res as unknown as ServerResponse);
+    const body = JSON.parse(res.body);
+    expect(body.accepts[0].maxAmountRequired).toBe('1000000');
+  });
+
+  it('first matching route wins when multiple routes could match', async () => {
+    const cfg: X402Config = {
+      enabled: true,
+      server: {
+        payTo: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+        amount: '1000000',
+        protectedPaths: ['/api/*'],
+        routes: [
+          { path: '/api/*',     amount: '100000' },
+          { path: '/api/data',  amount: '999999' }, // should never be reached for /api/data
+        ],
+      },
+    };
+    const handler = createX402Middleware(cfg)!;
+    const res = makeRes();
+    await handler(makeReq('/api/data'), res as unknown as ServerResponse);
+    const body = JSON.parse(res.body);
+    expect(body.accepts[0].maxAmountRequired).toBe('100000');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // createX402Middleware — defaults
 // ---------------------------------------------------------------------------
 

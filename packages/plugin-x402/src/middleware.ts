@@ -141,12 +141,18 @@ export function createX402Middleware(config: X402Config): X402PreHandler | null 
     const isProtected = protectedPaths.some((p) => pathMatches(urlPath, p));
     if (!isProtected) return false;
 
+    // Per-route pricing: find the first route whose path pattern matches.
+    const matchedRoute = serverCfg.routes?.find((r) => pathMatches(urlPath, r.path));
+    const effectiveAmount = matchedRoute?.amount ?? serverCfg.amount;
+    const effectiveDescription =
+      matchedRoute?.description ?? description;
+
     const requirements: X402PaymentRequirements = {
       scheme: 'exact',
       network,
-      maxAmountRequired: serverCfg.amount,
+      maxAmountRequired: effectiveAmount,
       resource: urlPath,
-      description,
+      description: effectiveDescription,
       mimeType: 'application/json',
       payTo: serverCfg.payTo,
       maxTimeoutSeconds,

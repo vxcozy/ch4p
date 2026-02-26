@@ -539,7 +539,12 @@ x402 HTTP micropayment plugin (`@ch4p/plugin-x402`). Disabled by default.
       "network": "base",
       "description": "Payment required to access this gateway.",
       "protectedPaths": ["/sessions", "/sessions/*", "/webhooks/*"],
-      "maxTimeoutSeconds": 300
+      "maxTimeoutSeconds": 300,
+      "routes": [
+        { "path": "/sessions",   "amount": "500000",  "description": "0.50 USDC per session" },
+        { "path": "/sessions/*", "amount": "250000" },
+        { "path": "/webhooks/*", "amount": "2000000", "description": "2 USDC per webhook call" }
+      ]
     },
     "client": {
       "privateKey": "${X402_PRIVATE_KEY}"
@@ -552,12 +557,16 @@ x402 HTTP micropayment plugin (`@ch4p/plugin-x402`). Disabled by default.
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `false` | Enable the x402 plugin. |
 | `server.payTo` | `string` | — | Wallet address that receives payments. |
-| `server.amount` | `string` | — | Amount in the asset's smallest unit. E.g. `"1000000"` = 1 USDC. |
+| `server.amount` | `string` | — | Global amount in the asset's smallest unit. E.g. `"1000000"` = 1 USDC. Used when no per-route override matches. |
 | `server.asset` | `string` | USDC on Base | ERC-20 token contract address. |
 | `server.network` | `string` | `"base"` | Network identifier (`"base"`, `"base-sepolia"`, `"ethereum"`). |
-| `server.description` | `string` | auto | Human-readable payment description in the 402 response. |
+| `server.description` | `string` | auto | Human-readable payment description in the 402 response. Used when no per-route override matches. |
 | `server.protectedPaths` | `string[]` | `["/*"]` | Paths to gate. Supports `"/*"` wildcard suffix. System paths are always exempt. |
 | `server.maxTimeoutSeconds` | `number` | `300` | Payment authorization TTL in seconds. |
+| `server.routes` | `X402RouteConfig[]` | `[]` | Per-route pricing overrides. Each entry supplies a `path` pattern, an `amount`, and an optional `description` that replace the global values for matched requests. Routes are checked in order; first match wins. |
+| `server.routes[].path` | `string` | — | Path pattern (same syntax as `protectedPaths`). |
+| `server.routes[].amount` | `string` | — | Amount override for this route. |
+| `server.routes[].description` | `string` | — | Description override for this route's 402 response. |
 | `client.privateKey` | `string` | — | 0x-prefixed private key for signing payment authorizations. Use env-var substitution: `"${X402_PRIVATE_KEY}"`. ⚠️ Never commit a real key. |
 | `client.tokenAddress` | `string` | USDC on Base | ERC-20 token contract address for the EIP-712 domain. |
 | `client.chainId` | `number` | `8453` | EIP-712 domain chain ID. Use `84532` for Base Sepolia. |

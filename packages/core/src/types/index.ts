@@ -303,6 +303,19 @@ export interface Ch4pConfig {
       protectedPaths?: string[];
       /** Seconds before a payment authorization expires. Default: 300. */
       maxTimeoutSeconds?: number;
+      /**
+       * Per-route pricing overrides.
+       * Each entry matches a path and supplies an `amount` (and optional
+       * `description`) that overrides the global value for that path.
+       */
+      routes?: Array<{
+        /** Path pattern (same syntax as `protectedPaths`). */
+        path: string;
+        /** Amount override for this route (asset's smallest unit). */
+        amount: string;
+        /** Optional description override for this route's 402 response. */
+        description?: string;
+      }>;
     };
     /** Client-side wallet for signing EIP-712 payment authorizations. */
     client?: {

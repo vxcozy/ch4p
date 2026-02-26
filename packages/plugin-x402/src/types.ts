@@ -75,14 +75,36 @@ export interface X402PaymentPayload {
 }
 
 /**
+ * Per-route payment override for a specific path pattern.
+ * When a request matches this pattern (using the same rules as `protectedPaths`),
+ * the route's `amount` and optional `description` take precedence over the
+ * global `X402ServerConfig` values.
+ */
+export interface X402RouteConfig {
+  /**
+   * URL path pattern to match. Supports the same syntax as `protectedPaths`:
+   * exact match ("/sessions"), wildcard prefix ("/webhooks/*"), or catch-all ("/*").
+   */
+  path: string;
+  /**
+   * Amount in the asset's smallest unit for requests matching this route.
+   * Overrides the global `amount` for this path.
+   */
+  amount: string;
+  /** Human-readable description override for this route's 402 response. */
+  description?: string;
+}
+
+/**
  * Server-side x402 protection configuration.
  */
 export interface X402ServerConfig {
   /** Wallet address that receives payments. */
   payTo: string;
   /**
-   * Payment amount in the asset's smallest unit.
+   * Global payment amount in the asset's smallest unit.
    * Example: "1000000" = 1 USDC (6 decimals).
+   * Individual routes can override this via `routes`.
    */
   amount: string;
   /**
@@ -105,6 +127,15 @@ export interface X402ServerConfig {
   protectedPaths?: string[];
   /** Seconds before a payment authorization expires. Default: 300. */
   maxTimeoutSeconds?: number;
+  /**
+   * Per-route pricing overrides.
+   * Each entry matches a path pattern and supplies an `amount` (and optional
+   * `description`) that replaces the global values for requests on that path.
+   * Routes are checked in order; the first match wins.
+   * Paths still need to appear in `protectedPaths` (or the default "/*") to
+   * be gated at all — `routes` only changes the *price*, not the *gating*.
+   */
+  routes?: X402RouteConfig[];
   /**
    * Optional payment verifier. Called with the decoded payment and the
    * active requirements after the X-PAYMENT header passes structural
