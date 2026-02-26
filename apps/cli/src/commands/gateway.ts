@@ -1347,7 +1347,7 @@ function handleInboundMessage(opts: InboundMessageOpts): void {
         const outbound = {
           text: responseText,
           replyTo: msg.id,
-          format: 'text' as const,
+          format: 'markdown' as const,
         };
 
         // Synthesize response audio (TTS) if voice is enabled.

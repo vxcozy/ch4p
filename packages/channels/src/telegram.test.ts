@@ -161,6 +161,107 @@ describe('TelegramChannel — topic/forum support', () => {
     });
   });
 
+  describe('send — markdown formatting (GFM → Telegram HTML)', () => {
+    function makeChannel() {
+      const ch = new TelegramChannel();
+      // @ts-expect-error — bypass private field for testing
+      ch.baseUrl = 'https://api.telegram.org/botTEST';
+      // @ts-expect-error
+      ch.abortController = new AbortController();
+      return ch;
+    }
+
+    function mockFetch(ch: TelegramChannel) {
+      return vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: true, result: { message_id: 1 } }),
+      } as Response);
+    }
+
+    async function captureBody(text: string, format: 'markdown' | 'html' | 'text') {
+      const ch = makeChannel();
+      const spy = mockFetch(ch);
+      await ch.send({ channelId: 'telegram', userId: '1' }, { text, format });
+      const body = JSON.parse(spy.mock.calls[0]![1]!.body as string);
+      spy.mockRestore();
+      return body as { text: string; parse_mode?: string };
+    }
+
+    it('sends format:markdown with parse_mode HTML', async () => {
+      const body = await captureBody('hello', 'markdown');
+      expect(body.parse_mode).toBe('HTML');
+    });
+
+    it('sends format:text without parse_mode', async () => {
+      const body = await captureBody('hello', 'text');
+      expect(body.parse_mode).toBeUndefined();
+    });
+
+    it('sends format:html with parse_mode HTML, text unchanged', async () => {
+      const body = await captureBody('<b>hi</b>', 'html');
+      expect(body.parse_mode).toBe('HTML');
+      expect(body.text).toBe('<b>hi</b>');
+    });
+
+    it('converts **bold** to <b>', async () => {
+      const body = await captureBody('**hello**', 'markdown');
+      expect(body.text).toBe('<b>hello</b>');
+    });
+
+    it('converts *italic* to <i>', async () => {
+      const body = await captureBody('*hello*', 'markdown');
+      expect(body.text).toBe('<i>hello</i>');
+    });
+
+    it('converts `code` to <code>', async () => {
+      const body = await captureBody('`foo`', 'markdown');
+      expect(body.text).toBe('<code>foo</code>');
+    });
+
+    it('converts fenced code block to <pre>', async () => {
+      const body = await captureBody('```\nconst x = 1;\n```', 'markdown');
+      expect(body.text).toBe('<pre>const x = 1;</pre>');
+    });
+
+    it('converts fenced code block with language to <pre><code class=...>', async () => {
+      const body = await captureBody('```ts\nconst x = 1;\n```', 'markdown');
+      expect(body.text).toBe('<pre><code class="language-ts">const x = 1;</code></pre>');
+    });
+
+    it('converts # header to <b>', async () => {
+      const body = await captureBody('# Title', 'markdown');
+      expect(body.text).toBe('<b>Title</b>');
+    });
+
+    it('converts [text](url) to <a href>', async () => {
+      const body = await captureBody('[click me](https://example.com)', 'markdown');
+      expect(body.text).toBe('<a href="https://example.com">click me</a>');
+    });
+
+    it('converts ~~text~~ to <s>', async () => {
+      const body = await captureBody('~~struck~~', 'markdown');
+      expect(body.text).toBe('<s>struck</s>');
+    });
+
+    it('strips table separator rows and converts data rows to plain text', async () => {
+      const table = '| A | B |\n|---|---|\n| 1 | 2 |';
+      const body = await captureBody(table, 'markdown');
+      expect(body.text).toContain('A │ B');
+      expect(body.text).toContain('1 │ 2');
+      expect(body.text).not.toContain('---');
+    });
+
+    it('escapes HTML entities in plain text', async () => {
+      const body = await captureBody('x < y & z > 0', 'markdown');
+      expect(body.text).toBe('x &lt; y &amp; z &gt; 0');
+    });
+
+    it('does not double-escape HTML entities inside bold', async () => {
+      const body = await captureBody('**a & b**', 'markdown');
+      expect(body.text).toBe('<b>a &amp; b</b>');
+    });
+  });
+
   describe('webhook secret verification', () => {
     it('accepts requests when no secret is configured', () => {
       const channel = makeTelegramChannel();

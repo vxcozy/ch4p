@@ -190,12 +190,13 @@ export class TelegramChannel implements IChannel {
 
     try {
       // Determine parse mode from format.
-      const parseMode = message.format === 'markdown' ? 'MarkdownV2' :
-        message.format === 'html' ? 'HTML' : undefined;
-
-      const rawText = parseMode === 'MarkdownV2'
-        ? this.escapeMarkdownV2(message.text)
-        : message.text;
+      // 'markdown' → convert GFM to HTML (HTML mode is simpler to get right than MarkdownV2).
+      // 'html'     → pass through as-is with HTML parse mode.
+      // 'text'     → plain text, no parse mode.
+      const parseMode = (message.format === 'markdown' || message.format === 'html') ? 'HTML' : undefined;
+      const rawText = message.format === 'markdown'
+        ? this.gfmToHtml(message.text ?? '')
+        : (message.text ?? '');
 
       // Split long messages into chunks that fit within Telegram's 4096-char limit.
       const chunks = splitMessage(rawText ?? '', TELEGRAM_MAX_MESSAGE_LEN);
@@ -250,12 +251,10 @@ export class TelegramChannel implements IChannel {
     }
 
     try {
-      const parseMode = message.format === 'markdown' ? 'MarkdownV2' :
-        message.format === 'html' ? 'HTML' : undefined;
-
-      const rawEditText = parseMode === 'MarkdownV2'
-        ? this.escapeMarkdownV2(message.text)
-        : message.text;
+      const parseMode = (message.format === 'markdown' || message.format === 'html') ? 'HTML' : undefined;
+      const rawEditText = message.format === 'markdown'
+        ? this.gfmToHtml(message.text ?? '')
+        : (message.text ?? '');
 
       // Truncate to Telegram's limit; full content will be delivered via send() chunks.
       const text = truncateMessage(rawEditText ?? '', TELEGRAM_MAX_MESSAGE_LEN);
@@ -571,10 +570,80 @@ export class TelegramChannel implements IChannel {
   }
 
   /**
-   * Escape special characters for Telegram MarkdownV2 parse mode.
-   * Telegram requires escaping: _ * [ ] ( ) ~ ` > # + - = | { } . !
+   * Convert GFM (GitHub Flavoured Markdown) to Telegram HTML parse mode.
+   *
+   * Handles: bold, italic, strikethrough, inline code, fenced code blocks,
+   * headers, blockquotes, links, tables (converted to plain text rows), and
+   * horizontal rules. HTML entities in plain-text regions are escaped.
+   *
+   * Using HTML rather than MarkdownV2 because HTML only requires escaping
+   * three chars (&, <, >) in text content — MarkdownV2 requires escaping 18+
+   * special chars and the rules for what counts as a "special context" are
+   * error-prone.
    */
-  private escapeMarkdownV2(text: string): string {
-    return text.replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+  private gfmToHtml(text: string): string {
+    const esc = (s: string): string =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    // Fragments that are already valid HTML — protected from further processing.
+    const frags: string[] = [];
+    const protect = (html: string): string => {
+      const key = `\x00${frags.length}\x00`;
+      frags.push(html);
+      return key;
+    };
+
+    // 1. Fenced code blocks: ```lang\ncode\n```
+    text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_m, lang: string, code: string) => {
+      const safe = esc(code.replace(/\n$/, ''));
+      return protect(lang
+        ? `<pre><code class="language-${lang}">${safe}</code></pre>`
+        : `<pre>${safe}</pre>`);
+    });
+
+    // 2. Inline code: `code`
+    text = text.replace(/`([^`\n]+)`/g, (_m, c: string) => protect(`<code>${esc(c)}</code>`));
+
+    // 3. Tables: convert each row to plain text, drop separator rows (|---|---|).
+    text = text.replace(/^\|.+\|[ \t]*$/gm, (row) => {
+      const inner = row.replace(/^\||\|$/g, '');
+      if (/^[\s:|–\-|]+$/.test(inner)) return ''; // separator row
+      return inner.split('|').map((c) => c.trim()).join(' │ ');
+    });
+    text = text.replace(/\n{3,}/g, '\n\n'); // collapse extra blank lines
+
+    // 4. Bold: **text** or word-boundary __text__
+    text = text.replace(/\*\*(.+?)\*\*/gs, (_m, c: string) => protect(`<b>${esc(c)}</b>`));
+    text = text.replace(/(?<!\w)__(.+?)__(?!\w)/gs, (_m, c: string) => protect(`<b>${esc(c)}</b>`));
+
+    // 5. Italic: *text* (single star) or word-boundary _text_
+    text = text.replace(/\*([^*\n]+?)\*/g, (_m, c: string) => protect(`<i>${esc(c)}</i>`));
+    text = text.replace(/(?<!\w)_([^_\n]+?)_(?!\w)/g, (_m, c: string) => protect(`<i>${esc(c)}</i>`));
+
+    // 6. Strikethrough: ~~text~~
+    text = text.replace(/~~(.+?)~~/g, (_m, c: string) => protect(`<s>${esc(c)}</s>`));
+
+    // 7. Headers: # text → <b>text</b>
+    text = text.replace(/^#{1,6} (.+)$/gm, (_m, c: string) => protect(`<b>${esc(c)}</b>`));
+
+    // 8. Blockquotes: > text
+    text = text.replace(/^> ?(.+)$/gm, (_m, c: string) =>
+      protect(`<blockquote>${esc(c)}</blockquote>`)
+    );
+
+    // 9. Links: [text](url)
+    text = text.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (_m, t: string, url: string) =>
+      protect(`<a href="${esc(url)}">${esc(t)}</a>`)
+    );
+
+    // 10. Horizontal rules
+    text = text.replace(/^(-{3,}|\*{3,}|_{3,})$/gm, '─────────────────');
+
+    // 11. Escape HTML entities in all remaining plain-text segments.
+    const parts = text.split(/(\x00\d+\x00)/);
+    text = parts.map((p, i) => (i % 2 === 0 ? esc(p) : p)).join('');
+
+    // 12. Restore protected fragments.
+    return text.replace(/\x00(\d+)\x00/g, (_m, i: string) => frags[+i]!);
   }
 }
