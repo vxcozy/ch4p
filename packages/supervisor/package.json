@@ -1,6 +1,6 @@
 {
   "name": "@ch4p/supervisor",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "description": "OTP-style supervision trees and health monitoring",
   "license": "Apache-2.0",

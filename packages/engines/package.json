@@ -1,6 +1,6 @@
 {
   "name": "@ch4p/engines",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "description": "Execution engines — native LLM, echo testing, and CLI subprocess wrappers",
   "license": "Apache-2.0",
