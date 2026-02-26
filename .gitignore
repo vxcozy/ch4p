@@ -33,6 +33,9 @@ todo.md
 lessons.md
 tasks/
 
+# Skills (user-local, not repo state)
+skills-lock.json
+
 # IDE / Agent
 .idea/
 .vscode/
