@@ -769,7 +769,10 @@ export function createClaudeCliEngine(
     id: 'claude-cli',
     name: 'Claude CLI',
     command: 'claude',
-    args: ['--print'],
+    // --dangerously-skip-permissions: gateway runs headlessly — no TTY to
+    // answer permission prompts. ch4p's own security layer (command allowlist,
+    // SSRF guards, path sandbox) handles tool-level defence above this.
+    args: ['--print', '--dangerously-skip-permissions'],
     promptMode: 'arg',
     timeout: 600_000, // 10 minutes for complex tasks
     ...overrides,
