@@ -1,6 +1,6 @@
 {
   "name": "@ch4p/security",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Filesystem scope, command allowlist, encrypted secrets, I/O sanitization",
   "license": "Apache-2.0",

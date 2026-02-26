@@ -1,6 +1,6 @@
 {
   "name": "@ch4p/providers",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "LLM providers — Anthropic, OpenAI, Google, OpenRouter, Ollama, Bedrock",
   "license": "Apache-2.0",

@@ -447,6 +447,15 @@ export class SubprocessEngine implements IEngine {
       } catch {
         // Ignore kill errors.
       }
+      // Explicitly destroy all I/O streams so their underlying pipe file
+      // descriptors are released immediately.  Without this, the parent-side
+      // ends of the pipes stay open until GC runs — which, under load, can be
+      // minutes later.  Accumulated open pipes across sessions exhaust the
+      // process FD table and cause subsequent spawn() calls to fail with EBADF.
+      try { child.stdin?.destroy(); } catch { /* ignore */ }
+      try { child.stdout?.destroy(); } catch { /* ignore */ }
+      try { child.stderr?.destroy(); } catch { /* ignore */ }
+      if (stdinRef) stdinRef.stream = null;
     }
   }
 
