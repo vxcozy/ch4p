@@ -1,6 +1,6 @@
 {
   "name": "@ch4p/tools",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Agent tools — bash, file ops, grep, glob, web fetch/search, browser, memory, MCP",
   "license": "Apache-2.0",
