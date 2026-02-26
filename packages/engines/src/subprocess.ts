@@ -313,6 +313,10 @@ export class SubprocessEngine implements IEngine {
         }
       }
 
+      // Cap stdout accumulation at 10 MiB. A runaway subprocess that outputs
+      // unbounded text would otherwise grow fullAnswer until OOM.
+      const MAX_STDOUT = 10_485_760; // 10 MiB
+      let stdoutCapped = false;
       let fullAnswer = '';
       let cleanText  = '';
       const parser = new StreamingToolParser();
@@ -325,11 +329,17 @@ export class SubprocessEngine implements IEngine {
           if (abortController.signal.aborted) break;
 
           const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
-          fullAnswer += text;
+          if (!stdoutCapped) {
+            fullAnswer += text;
+            if (fullAnswer.length > MAX_STDOUT) {
+              fullAnswer = fullAnswer.slice(0, MAX_STDOUT) + '\n[stdout truncated]';
+              stdoutCapped = true;
+            }
+          }
 
           for (const ev of parser.process(text)) {
             if (ev.type === 'text') {
-              cleanText += ev.delta;
+              if (cleanText.length < MAX_STDOUT) cleanText += ev.delta;
               yield emit({ type: 'text_delta', delta: ev.delta });
             } else {
               yield emit({

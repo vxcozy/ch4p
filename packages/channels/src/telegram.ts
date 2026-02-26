@@ -351,15 +351,27 @@ export class TelegramChannel implements IChannel {
   private startPolling(): void {
     if (!this.running && !this.abortController) return;
 
+    // Client-side deadline: 5 s longer than the server-side timeout (30 s).
+    // Without this, a stalled or slow TLS connection hangs the polling loop
+    // indefinitely and prevents the old connection from being cleaned up.
+    const POLL_CLIENT_TIMEOUT_MS = 35_000;
+
     const poll = async () => {
       if (!this.running) return;
 
       try {
+        // Combine the channel-level abort signal with a per-request deadline so
+        // the underlying TLS connection is always released within POLL_CLIENT_TIMEOUT_MS.
+        const deadline = AbortSignal.timeout(POLL_CLIENT_TIMEOUT_MS);
+        const signal = this.abortController
+          ? AbortSignal.any([this.abortController.signal, deadline])
+          : deadline;
+
         const updates = await this.apiCall<TelegramUpdate[]>('getUpdates', {
           offset: this.pollOffset,
           timeout: 30,
           limit: 100,
-        });
+        }, signal);
 
         if (updates && updates.length > 0) {
           for (const update of updates) {
@@ -469,14 +481,14 @@ export class TelegramChannel implements IChannel {
   // API helpers
   // -----------------------------------------------------------------------
 
-  private async apiCall<T>(method: string, params?: Record<string, unknown>): Promise<T | null> {
+  private async apiCall<T>(method: string, params?: Record<string, unknown>, signal?: AbortSignal): Promise<T | null> {
     const url = `${this.baseUrl}/${method}`;
 
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: params ? JSON.stringify(params) : undefined,
-      signal: this.abortController?.signal,
+      signal: signal ?? this.abortController?.signal,
     });
 
     const data = (await response.json()) as TelegramResponse<T>;
