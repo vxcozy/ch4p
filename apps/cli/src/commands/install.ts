@@ -122,7 +122,7 @@ ${programArgsXml}
 \t\t<key>HOME</key>
 \t\t<string>${homedir()}</string>
 \t\t<key>PATH</key>
-\t\t<string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+\t\t<string>${homedir()}/.local/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
 \t</dict>
 
 \t<key>WorkingDirectory</key>
