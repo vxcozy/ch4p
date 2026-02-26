@@ -154,6 +154,21 @@ function isReaction(associatedMessageType: number | null): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// JXA accessibility path constants
+// ---------------------------------------------------------------------------
+
+/** Sidebar scroll area — contains the conversation list. */
+export const JXA_SIDEBAR_PATH = 'proc.windows[0].splitterGroups[0].scrollAreas[0]';
+/** Primary message transcript area on macOS 13–14 (scrollAreas index 1). */
+export const JXA_MSG_AREA_PATH = 'proc.windows[0].splitterGroups[0].scrollAreas[1]';
+/**
+ * Fallback message transcript area path.
+ * On macOS versions where the splitter layout differs, the transcript may be
+ * at scrollAreas[0] rather than scrollAreas[1].
+ */
+export const JXA_MSG_AREA_ALT = 'proc.windows[0].splitterGroups[0].scrollAreas[0]';
+
+// ---------------------------------------------------------------------------
 // IMessageChannel
 // ---------------------------------------------------------------------------
 
@@ -168,6 +183,8 @@ export class IMessageChannel implements IChannel {
   private lastRowId = 0;
   private dbPath = '';
   private allowedHandles: Set<string> = new Set();
+  /** macOS version string (e.g. "15.1") for diagnostic error messages. Null if detection failed. */
+  private macOSVersion: string | null = null;
 
   // -----------------------------------------------------------------------
   // IChannel implementation
@@ -228,8 +245,16 @@ export class IMessageChannel implements IChannel {
       throw new Error(`Failed to query iMessage database: ${message}`);
     }
 
-    // -- Start polling loop ------------------------------------------------
+    // -- Detect macOS version for diagnostic error messages (best-effort) ----
     this.running = true;
+    try {
+      const { stdout: versionOut } = await execFile('sw_vers', ['-productVersion']);
+      this.macOSVersion = versionOut.trim() || null;
+    } catch {
+      this.macOSVersion = null;
+    }
+
+    // -- Start polling loop ------------------------------------------------
     this.startPolling();
   }
 
@@ -341,7 +366,15 @@ export class IMessageChannel implements IChannel {
 
     const jxa = buildTapbackScript(info.chatIdentifier, info.text, reactionIndex);
     try {
-      await execFile('osascript', ['-l', 'JavaScript', '-e', jxa]);
+      const { stdout: jxaOut } = await execFile('osascript', ['-l', 'JavaScript', '-e', jxa]);
+      const out = jxaOut.trim();
+      // The JXA script returns error strings to stdout on non-fatal failures.
+      if (out.startsWith('react_menu_error:') || out === 'message_not_found') {
+        return {
+          success: false,
+          error: `${out} (macOS ${this.macOSVersion ?? 'unknown'})`,
+        };
+      }
       return { success: true };
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -353,7 +386,7 @@ export class IMessageChannel implements IChannel {
             'System Settings > Privacy & Security > Accessibility.',
         };
       }
-      return { success: false, error: errMsg };
+      return { success: false, error: `${errMsg} (macOS ${this.macOSVersion ?? 'unknown'})` };
     }
   }
 
@@ -649,7 +682,7 @@ export function buildTapbackScript(
 
   // Select the conversation in the sidebar.
   try {
-    const sidebar = proc.windows[0].splitterGroups[0].scrollAreas[0];
+    const sidebar = ${JXA_SIDEBAR_PATH};
     const rows = sidebar.tables[0].rows();
     for (const row of rows) {
       try {
@@ -663,11 +696,11 @@ export function buildTapbackScript(
   } catch (_) {}
   delay(0.3);
 
-  // Find the message bubble.
+  // Find the message bubble — primary path (macOS 13–14).
   let msgEl = null;
   const targetText = "${esc(messageText.slice(0, 40))}";
   try {
-    const msgArea = proc.windows[0].splitterGroups[0].scrollAreas[1];
+    const msgArea = ${JXA_MSG_AREA_PATH};
     const groups = msgArea.groups();
     for (const g of groups) {
       try {
@@ -678,6 +711,22 @@ export function buildTapbackScript(
       } catch (_) {}
     }
   } catch (_) {}
+
+  // Fallback path: try alternate scroll area if primary search found nothing.
+  if (!msgEl) {
+    try {
+      const msgAreaAlt = ${JXA_MSG_AREA_ALT};
+      const altGroups = msgAreaAlt.groups();
+      for (const g of altGroups) {
+        try {
+          const txt = g.staticTexts[0].value();
+          if (txt && txt.includes(targetText)) {
+            msgEl = g;
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
 
   if (!msgEl) return "message_not_found";
 

@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { IMessageChannel, buildTapbackScript } from './imessage.js';
+import { IMessageChannel, buildTapbackScript, JXA_MSG_AREA_PATH, JXA_MSG_AREA_ALT } from './imessage.js';
 
 // ---------------------------------------------------------------------------
 // Mock child_process
@@ -1206,5 +1206,139 @@ describe('buildTapbackScript', () => {
   it('escapes backslashes in messageText', () => {
     const script = buildTapbackScript('id', 'path\\to\\file', 0);
     expect(script).toContain('path\\\\to\\\\file');
+  });
+
+  it('contains both JXA_MSG_AREA_PATH and JXA_MSG_AREA_ALT paths (primary + fallback)', () => {
+    const script = buildTapbackScript('+15555550100', 'Hello', 0);
+    // Primary macOS 13–14 path must be present.
+    expect(script).toContain(JXA_MSG_AREA_PATH);
+    // Fallback path must also be present.
+    expect(script).toContain(JXA_MSG_AREA_ALT);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// iMessage robustness tests (macOS version detection + error strings)
+// ---------------------------------------------------------------------------
+
+describe('IMessageChannel — robustness', () => {
+  let channel: IMessageChannel;
+
+  beforeEach(() => {
+    channel = new IMessageChannel();
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+  });
+
+  afterEach(async () => {
+    try { await channel.stop(); } catch { /* ignore */ }
+    Object.defineProperty(process, 'platform', { value: process.platform, configurable: true });
+    vi.clearAllMocks();
+  });
+
+  it('start() populates macOSVersion when sw_vers succeeds', async () => {
+    const execMock = await getExecFileMock();
+    execMock.mockImplementation(
+      (cmd: string, args: string[], cb: (err: Error | null, result?: { stdout: string }) => void) => {
+        if (cmd === 'which') { cb(null, { stdout: '/usr/bin/sqlite3' }); return; }
+        if (cmd === 'sw_vers') { cb(null, { stdout: '15.1\n' }); return; }
+        if (cmd === 'sqlite3') {
+          const query: string = args[2] ?? '';
+          if (query.includes('MAX(ROWID)')) {
+            cb(null, { stdout: JSON.stringify([{ max_id: 0 }]) });
+            return;
+          }
+          cb(null, { stdout: '[]' });
+          return;
+        }
+        cb(null, { stdout: '' });
+      },
+    );
+
+    await channel.start({ dbPath: '/tmp/test.db', pollInterval: 60000 });
+    await channel.stop();
+
+    const ver = (channel as unknown as Record<string, unknown>)['macOSVersion'];
+    expect(ver).toBe('15.1');
+  });
+
+  it('sendReaction error includes macOS version when JXA returns react_menu_error', async () => {
+    const execMock = await getExecFileMock();
+    execMock.mockImplementation(
+      (cmd: string, args: string[], cb: (err: Error | null, result?: { stdout: string }) => void) => {
+        if (cmd === 'which') { cb(null, { stdout: '/usr/bin/sqlite3' }); return; }
+        if (cmd === 'sw_vers') { cb(null, { stdout: '14.6' }); return; }
+        if (cmd === 'sqlite3') {
+          const query: string = args[2] ?? '';
+          if (query.includes('MAX(ROWID)')) {
+            cb(null, { stdout: JSON.stringify([{ max_id: 0 }]) });
+            return;
+          }
+          if (query.includes('FROM message m') && query.includes('chat_identifier')) {
+            cb(null, { stdout: JSON.stringify([{ text: 'Hi there', chat_identifier: '+15550000001' }]) });
+            return;
+          }
+          cb(null, { stdout: '[]' });
+          return;
+        }
+        if (cmd === 'osascript') {
+          // Simulate JXA returning a react_menu_error string to stdout.
+          cb(null, { stdout: 'react_menu_error: AXError -25202' });
+          return;
+        }
+        cb(null, { stdout: '' });
+      },
+    );
+
+    await channel.start({ dbPath: '/tmp/test.db', pollInterval: 60000 });
+    const result = await channel.sendReaction(
+      { channelId: 'imessage', userId: '+15550000001' },
+      'guid-abc',
+      'love',
+    );
+    await channel.stop();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('react_menu_error:');
+    expect(result.error).toContain('macOS 14.6');
+  });
+
+  it('sendReaction catch-block error includes macOS version', async () => {
+    const execMock = await getExecFileMock();
+    execMock.mockImplementation(
+      (cmd: string, args: string[], cb: (err: Error | null, result?: { stdout: string }) => void) => {
+        if (cmd === 'which') { cb(null, { stdout: '/usr/bin/sqlite3' }); return; }
+        if (cmd === 'sw_vers') { cb(null, { stdout: '13.7' }); return; }
+        if (cmd === 'sqlite3') {
+          const query: string = args[2] ?? '';
+          if (query.includes('MAX(ROWID)')) {
+            cb(null, { stdout: JSON.stringify([{ max_id: 0 }]) });
+            return;
+          }
+          if (query.includes('FROM message m') && query.includes('chat_identifier')) {
+            cb(null, { stdout: JSON.stringify([{ text: 'Hello', chat_identifier: '+15550000001' }]) });
+            return;
+          }
+          cb(null, { stdout: '[]' });
+          return;
+        }
+        if (cmd === 'osascript') {
+          // Throw a generic (non-authorization) error.
+          cb(new Error('osascript execution failed unexpectedly'));
+          return;
+        }
+        cb(null, { stdout: '' });
+      },
+    );
+
+    await channel.start({ dbPath: '/tmp/test.db', pollInterval: 60000 });
+    const result = await channel.sendReaction(
+      { channelId: 'imessage', userId: '+15550000001' },
+      'guid-xyz',
+      'like',
+    );
+    await channel.stop();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('macOS 13.7');
   });
 });
