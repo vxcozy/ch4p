@@ -1,6 +1,6 @@
 {
   "name": "@ch4p/web",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Canvas workspace — React + tldraw SPA",
   "license": "Apache-2.0",
   "private": true,

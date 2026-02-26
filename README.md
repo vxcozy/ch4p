@@ -31,7 +31,7 @@ Built on four pillars:
 - **Broad connectivity** — 16 messaging channels, tunnel exposure, and a skills system with OpenClaw-compatible skill format.
 - **Resilient concurrency** — OTP-style supervision trees, process isolation, backpressure, and live steering for long-running agent sessions.
 - **Security-first defaults** — trait-based architecture where every defense layer is on by default, hybrid memory search, and encrypted secrets at rest.
-- **Agent reliability** — mandatory tool call validation, state snapshots with diff-based verification, and LLM-as-a-judge outcome assessment. Inspired by the [Agent World Model](https://arxiv.org/abs/2602.10090) research.
+- **Agent reliability** — mandatory tool call validation, state snapshots with diff-based verification, LLM-as-a-judge outcome assessment, and crash recovery via session notes (in-flight tasks resume after restart). Inspired by the [Agent World Model](https://arxiv.org/abs/2602.10090) research.
 
 ## Quick Start
 
@@ -160,7 +160,8 @@ Nine defense layers, all on by default:
 | **Hybrid verification** | FormatVerifier + LLMVerifier two-phase check after each task, both on by default |
 | **State snapshots** | Tools capture observable state before/after execution for diff-based verification |
 | **Auto-memory** | Recall relevant memories before each message, store learnings after each run |
-| **Hybrid memory search** | SQLite FTS5 BM25 + cosine vector similarity, configurable blend |
+| **Hybrid memory search** | SQLite FTS5 BM25 + cosine vector similarity, configurable blend; OpenAI → Ollama → noop provider chain with automatic fallback |
+| **Crash recovery** | Session notes survive gateway restarts; agent resumes in-flight tasks from where it left off |
 | **Canvas workspace** | Spatial tldraw interface with 11 A2UI component types, bidirectional interaction |
 | **Skills** | Curated instruction sets loaded on-demand via progressive disclosure (OpenClaw compatible) |
 | **Mesh orchestration** | Swarm-style parallel sub-agents across engines, bounded concurrency, partial failure tolerance |

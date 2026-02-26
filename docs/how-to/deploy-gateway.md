@@ -235,6 +235,14 @@ TimeoutStopSec=40
 KillMode=mixed
 ```
 
+## Crash Recovery (Session Notes)
+
+If the gateway crashes mid-run (OOM, SIGKILL, power loss) without a clean shutdown, **session notes** ensure the agent can resume from where it left off on the next start.
+
+During each agent run the gateway writes a short progress note to `~/.ch4p/session-notes/` after every tool call. On restart it reads any surviving notes and replays a compact context summary so the agent can continue the interrupted task rather than starting from scratch.
+
+Notes are automatically cleaned up when a session ends normally. No configuration is required — crash recovery is on by default.
+
 ## Docker Deployment
 
 A `Dockerfile` and `docker-compose.yml` are included in the repository root.
