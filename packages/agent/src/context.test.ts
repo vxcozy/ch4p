@@ -746,6 +746,92 @@ describe('ContextManager', () => {
     });
   });
 
+  describe('maxMessages cap', () => {
+    it('uses default maxMessages of 500', () => {
+      const ctx = new ContextManager();
+      expect(ctx.getMaxMessages()).toBe(500);
+    });
+
+    it('accepts custom maxMessages', () => {
+      const ctx = new ContextManager({ maxMessages: 10 });
+      expect(ctx.getMaxMessages()).toBe(10);
+    });
+
+    it('triggers compaction when message count exceeds maxMessages even if tokens are low', async () => {
+      // High token budget so the token threshold is never reached.
+      // maxMessages = 3 means compaction fires after the 4th message.
+      const ctx = new ContextManager({
+        maxTokens: 1_000_000,
+        compactionThreshold: 0.99,
+        maxMessages: 3,
+        strategy: 'drop_oldest',
+      });
+
+      await ctx.addMessage({ role: 'user', content: 'a' });
+      await ctx.addMessage({ role: 'assistant', content: 'b' });
+      await ctx.addMessage({ role: 'user', content: 'c' });
+      // 3 messages == maxMessages, not yet exceeded → no compaction yet.
+      expect(ctx.getMessages().length).toBe(3);
+
+      // 4th message → length(4) > maxMessages(3) → compaction fires.
+      await ctx.addMessage({ role: 'assistant', content: 'd' });
+      // After drop_oldest compaction, message count must be ≤ maxMessages.
+      expect(ctx.getMessages().length).toBeLessThanOrEqual(3);
+    });
+
+    it('count cap works with tool-call messages that have empty content', async () => {
+      const ctx = new ContextManager({
+        maxTokens: 1_000_000,
+        compactionThreshold: 0.99,
+        maxMessages: 4,
+        strategy: 'drop_oldest',
+      });
+
+      // Add 4 messages with empty content (like tool-call assistant messages).
+      for (let i = 0; i < 4; i++) {
+        await ctx.addMessage({
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: `tc${i}`, name: 'read_file', args: {} }],
+        });
+      }
+      expect(ctx.getMessages().length).toBe(4); // not yet exceeded
+
+      // 5th pushes length to 5, triggering compaction.
+      await ctx.addMessage({ role: 'user', content: 'done' });
+      expect(ctx.getMessages().length).toBeLessThanOrEqual(4);
+    });
+  });
+
+  describe('toolCalls token estimation', () => {
+    it('counts toolCalls name + args in token estimate', async () => {
+      const ctxWithToolCalls = new ContextManager();
+      const ctxWithout = new ContextManager();
+
+      // Message with empty content but non-trivial tool call.
+      await ctxWithToolCalls.addMessage({
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'tc1', name: 'read_large_file', args: { path: '/some/path/file.ts' } }],
+      });
+
+      // Equivalent message with no tool calls (should have lower estimate).
+      await ctxWithout.addMessage({ role: 'assistant', content: '' });
+
+      expect(ctxWithToolCalls.getTokenEstimate()).toBeGreaterThan(ctxWithout.getTokenEstimate());
+    });
+
+    it('produces a non-zero estimate for a tool-call message with empty content', async () => {
+      const ctx = new ContextManager();
+      await ctx.addMessage({
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'tc1', name: 'bash', args: { command: 'ls -la' } }],
+      });
+      expect(ctx.getTokenEstimate()).toBeGreaterThan(0);
+    });
+  });
+
   describe('tool-call group integrity', () => {
     it('never splits tool-call assistant messages from their tool results', async () => {
       const ctx = new ContextManager({

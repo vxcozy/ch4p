@@ -59,6 +59,15 @@ export interface ContextManagerOpts {
   maxTokens?: number;
   /** Compaction fires when usage exceeds this fraction of maxTokens. Default: 0.85. */
   compactionThreshold?: number;
+  /**
+   * Maximum number of conversation messages before compaction is forced,
+   * regardless of token count. Guards against unbounded accumulation of
+   * short messages (e.g. tool-call pairs with minimal content) that stay
+   * below the token threshold for a long time.
+   *
+   * Default: 500.
+   */
+  maxMessages?: number;
   /** Which compaction strategy to use. Default: 'sliding'. Can be a simple
    *  strategy name or a named strategy object for fine-grained control. */
   strategy?: CompactionStrategy | NamedStrategy;
@@ -129,16 +138,29 @@ export const NAMED_STRATEGIES: Record<string, NamedStrategy> = {
 
 /** Rough token estimate: ~4 characters per token. */
 function estimateTokens(msg: Message): number {
-  if (typeof msg.content === 'string') {
-    return Math.ceil(msg.content.length / 4);
-  }
-  // ContentBlock array — sum text lengths across blocks.
   let chars = 0;
-  for (const block of msg.content) {
-    if (block.text) chars += block.text.length;
-    if (block.toolOutput) chars += block.toolOutput.length;
-    if (block.toolInput) chars += JSON.stringify(block.toolInput).length;
+
+  if (typeof msg.content === 'string') {
+    chars += msg.content.length;
+  } else {
+    // ContentBlock array — sum text lengths across blocks.
+    for (const block of msg.content) {
+      if (block.text) chars += block.text.length;
+      if (block.toolOutput) chars += block.toolOutput.length;
+      if (block.toolInput) chars += JSON.stringify(block.toolInput).length;
+    }
   }
+
+  // Count tool call data (name + serialised arguments) on assistant messages.
+  // Without this, messages with content:'' but real tool calls estimate at
+  // 0 tokens and never trigger the token-based compaction threshold.
+  if (Array.isArray(msg.toolCalls)) {
+    for (const tc of msg.toolCalls) {
+      if (tc.name) chars += tc.name.length;
+      if (tc.args != null) chars += JSON.stringify(tc.args).length;
+    }
+  }
+
   return Math.ceil(chars / 4);
 }
 
@@ -168,6 +190,7 @@ export class ContextManager {
 
   private readonly maxTokens: number;
   private readonly compactionThreshold: number;
+  private readonly maxMessages: number;
   private readonly strategyType: CompactionStrategy;
   private readonly namedStrategy: NamedStrategy | null;
   private readonly summarizer?: (messages: Message[]) => Promise<string>;
@@ -175,6 +198,7 @@ export class ContextManager {
   constructor(opts: ContextManagerOpts = {}) {
     this.maxTokens = opts.maxTokens ?? 100_000;
     this.compactionThreshold = opts.compactionThreshold ?? 0.85;
+    this.maxMessages = opts.maxMessages ?? 500;
     this.summarizer = opts.summarizer;
 
     // Resolve strategy — can be a simple string or a named strategy object.
@@ -210,6 +234,13 @@ export class ContextManager {
     if (this.tokenEstimate > this.maxTokens * this.compactionThreshold) {
       await this.compact();
     }
+
+    // Enforce the message-count cap independently of the token threshold.
+    // This prevents unbounded accumulation of short messages (e.g. tool-call
+    // pairs with minimal content) that never trigger token-based compaction.
+    if (this.messages.length > this.maxMessages) {
+      this.enforceMessageCap();
+    }
   }
 
   /** Return the full message array (system prompt + conversation). */
@@ -228,6 +259,11 @@ export class ContextManager {
   /** Return the configured maximum token budget. */
   getMaxTokens(): number {
     return this.maxTokens;
+  }
+
+  /** Return the configured maximum message count before compaction is forced. */
+  getMaxMessages(): number {
+    return this.maxMessages;
   }
 
   /** Return the active strategy name. */
@@ -522,6 +558,38 @@ export class ContextManager {
       }
     }
     return end;
+  }
+
+  /**
+   * Drop the oldest messages until message count is within `maxMessages`.
+   * Tool-call/result groups are always dropped atomically to maintain integrity.
+   * Called automatically by `addMessage` when the count cap is exceeded.
+   */
+  private enforceMessageCap(): void {
+    let idx = 0;
+    while (this.messages.length > this.maxMessages && idx < this.messages.length - 1) {
+      const msg = this.messages[idx]!;
+
+      // Tool-call group — drop the assistant message + all its tool results as a unit.
+      if (hasToolCalls(msg)) {
+        const groupEnd = this.findToolGroupEnd(idx);
+        const dropped = this.messages.splice(idx, groupEnd - idx + 1);
+        for (const d of dropped) this.tokenEstimate -= estimateTokens(d);
+        // idx stays the same — splice shifted everything left.
+        continue;
+      }
+
+      // Skip stray tool-result messages (should not appear without a preceding
+      // tool-call message, but guard defensively).
+      if (isToolResultMessage(msg)) {
+        idx++;
+        continue;
+      }
+
+      // Regular message — drop it.
+      this.messages.splice(idx, 1);
+      this.tokenEstimate -= estimateTokens(msg);
+    }
   }
 
   /** Recompute tokenEstimate from scratch. */
