@@ -1,6 +1,6 @@
 {
   "name": "@ch4p/memory",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Hybrid memory search — SQLite FTS5 full-text + vector embeddings",
   "license": "Apache-2.0",
