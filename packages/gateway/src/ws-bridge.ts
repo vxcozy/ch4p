@@ -35,6 +35,9 @@ export interface BridgeAgentEvent {
 export class WebSocketBridge {
   private changeUnsubscribe: (() => void) | null = null;
   private alive = false;
+  private messageHandler: ((data: Buffer | ArrayBuffer | Buffer[]) => void) | null = null;
+  private closeHandler: (() => void) | null = null;
+  private errorHandler: (() => void) | null = null;
 
   constructor(
     private readonly ws: WebSocket,
@@ -61,8 +64,8 @@ export class WebSocketBridge {
     // Send initial idle status
     this.send({ type: 's2c:agent:status', status: 'idle' });
 
-    // Handle incoming WebSocket messages
-    this.ws.on('message', (data: Buffer | ArrayBuffer | Buffer[]) => {
+    // Handle incoming WebSocket messages — store refs so stop() can remove them.
+    this.messageHandler = (data: Buffer | ArrayBuffer | Buffer[]) => {
       try {
         const raw = Buffer.isBuffer(data)
           ? data.toString('utf-8')
@@ -78,10 +81,13 @@ export class WebSocketBridge {
           message: 'Invalid message format',
         });
       }
-    });
+    };
+    this.closeHandler = () => this.stop();
+    this.errorHandler = () => this.stop();
 
-    this.ws.on('close', () => this.stop());
-    this.ws.on('error', () => this.stop());
+    this.ws.on('message', this.messageHandler);
+    this.ws.on('close', this.closeHandler);
+    this.ws.on('error', this.errorHandler);
   }
 
   /** Called by the gateway when AgentEvents arrive from the agent loop. */
@@ -162,12 +168,15 @@ export class WebSocketBridge {
     }
   }
 
-  /** Stop the bridge — unsubscribe from state changes. */
+  /** Stop the bridge — unsubscribe from state changes and remove WS listeners. */
   stop(): void {
     if (!this.alive) return;
     this.alive = false;
     this.changeUnsubscribe?.();
     this.changeUnsubscribe = null;
+    if (this.messageHandler) { this.ws.off('message', this.messageHandler); this.messageHandler = null; }
+    if (this.closeHandler) { this.ws.off('close', this.closeHandler); this.closeHandler = null; }
+    if (this.errorHandler) { this.ws.off('error', this.errorHandler); this.errorHandler = null; }
   }
 
   /** Whether the bridge is currently active. */

@@ -296,5 +296,19 @@ describe('BashTool', () => {
       expect(result.output).toContain('out-msg');
       expect(result.output).toContain('err-msg');
     });
+
+    it('kills the process and reports error when output exceeds 10 MiB', async () => {
+      const ctx = makeContext();
+      // Generate >10 MiB: yes outputs ~1 byte/line; `dd` is more predictable.
+      // Write 11 MiB of zeros to stdout then exit.
+      const result = await tool.execute(
+        { command: 'dd if=/dev/zero bs=1048576 count=11 2>/dev/null | cat' },
+        ctx,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/10MiB limit/);
+      expect(result.metadata?.outputCapped).toBe(true);
+    }, 15_000);
   });
 });

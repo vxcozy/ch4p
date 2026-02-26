@@ -16,6 +16,7 @@
  */
 
 import { createRequire } from 'node:module';
+import { writeHeapSnapshot } from 'node:v8';
 import type { Ch4pConfig, IChannel, IMemoryBackend, InboundMessage, ITunnelProvider } from '@ch4p/core';
 import { createX402Middleware, X402PayTool, createEIP712Signer, walletAddress } from '@ch4p/plugin-x402';
 import type { X402Config } from '@ch4p/plugin-x402';
@@ -702,6 +703,8 @@ export async function gateway(args: string[]): Promise<void> {
 
   // Periodic eviction of stale entries from unbounded maps (every 5 minutes).
   const CONTEXT_IDLE_MS = 60 * 60_000; // 1 hour
+  // Write at most one heap snapshot per process lifetime (at the 2 GB threshold).
+  let heapSnapshotTaken = false;
   const evictionTimer = setInterval(() => {
     gatewayRateLimiter.evictStale();
 
@@ -713,9 +716,10 @@ export async function gateway(args: string[]): Promise<void> {
       }
     }
 
-    // Evict idle sessions and stale routes.
+    // Evict idle sessions, stale routes, and idle canvas sessions.
     sessionManager.evictIdle(CONTEXT_IDLE_MS);
     messageRouter.evictStale();
+    server.evictIdleCanvas(CONTEXT_IDLE_MS);
 
     // Log heap usage and context count for diagnostics.
     const heap = process.memoryUsage();
@@ -724,6 +728,18 @@ export async function gateway(args: string[]): Promise<void> {
     console.log(
       `  ${DIM}[eviction] heap=${heapMB}MB rss=${rssMB}MB contexts=${conversationContexts.size} sessions=${sessionManager.size}${RESET}`,
     );
+
+    // Write a heap snapshot once if we cross 2 GB — gives a dump to analyze
+    // before the process OOMs rather than having nothing to inspect afterward.
+    if (heapMB > 2000 && !heapSnapshotTaken) {
+      heapSnapshotTaken = true;
+      try {
+        const snapshotPath = writeHeapSnapshot();
+        console.log(`  ${YELLOW}[OOM warning]${RESET} Heap at ${heapMB}MB — snapshot: ${snapshotPath}`);
+      } catch {
+        // Best-effort; don't let snapshot failure take down the process.
+      }
+    }
   }, 5 * 60_000);
 
   // Keep the process alive until interrupted.

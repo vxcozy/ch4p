@@ -28,6 +28,8 @@ interface BashArgs {
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_OUTPUT_LENGTH = 30_000;
+/** Kill the subprocess when combined stdout+stderr exceeds this (10 MiB). */
+const MAX_BASH_OUTPUT_BYTES = 10 * 1024 * 1024;
 
 export class BashTool implements ITool {
   readonly name = 'bash';
@@ -175,17 +177,29 @@ export class BashTool implements ITool {
       const stderrChunks: Buffer[] = [];
       let totalBytes = 0;
       let killed = false;
+      let outputCapped = false;
+
+      const killForOutputCap = () => {
+        if (outputCapped) return;
+        outputCapped = true;
+        child.kill('SIGTERM');
+        setTimeout(() => {
+          if (!child.killed) child.kill('SIGKILL');
+        }, 5_000);
+      };
 
       child.stdout?.on('data', (chunk: Buffer) => {
         stdoutChunks.push(chunk);
         totalBytes += chunk.length;
         context.onProgress(`[stdout] ${chunk.toString('utf-8').trim()}`);
+        if (totalBytes > MAX_BASH_OUTPUT_BYTES) killForOutputCap();
       });
 
       child.stderr?.on('data', (chunk: Buffer) => {
         stderrChunks.push(chunk);
         totalBytes += chunk.length;
         context.onProgress(`[stderr] ${chunk.toString('utf-8').trim()}`);
+        if (totalBytes > MAX_BASH_OUTPUT_BYTES) killForOutputCap();
       });
 
       // Timeout handling
@@ -235,6 +249,16 @@ export class BashTool implements ITool {
             output.slice(0, halfLen) +
             '\n\n... [output truncated] ...\n\n' +
             output.slice(output.length - halfLen);
+        }
+
+        if (outputCapped) {
+          resolvePromise({
+            success: false,
+            output,
+            error: `Command output exceeded ${MAX_BASH_OUTPUT_BYTES / 1024 / 1024}MiB limit and was killed.`,
+            metadata: { code, signal, outputCapped: true },
+          });
+          return;
         }
 
         if (killed && context.abortSignal.aborted) {

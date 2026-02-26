@@ -167,6 +167,14 @@ export class GatewayServer {
     this.tunnelUrl = url;
   }
 
+  /**
+   * Evict canvas sessions that have been idle longer than maxIdleMs.
+   * Returns the number of sessions evicted, or 0 if canvas is not enabled.
+   */
+  evictIdleCanvas(maxIdleMs: number): number {
+    return this.canvasSessionManager?.evictIdle(maxIdleMs) ?? 0;
+  }
+
   /** Get the bound address (useful in tests with port 0). */
   getAddress(): { host: string; port: number } | null {
     if (!this.server) return null;

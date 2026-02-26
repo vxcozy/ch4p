@@ -135,6 +135,29 @@ describe('WebSocketBridge', () => {
       ws.emit('error', new Error('connection lost'));
       expect(bridge.isAlive()).toBe(false);
     });
+
+    it('removes message/close/error listeners from WebSocket on stop', () => {
+      bridge.start();
+      expect(ws.listenerCount('message')).toBeGreaterThan(0);
+      expect(ws.listenerCount('close')).toBeGreaterThan(0);
+      expect(ws.listenerCount('error')).toBeGreaterThan(0);
+
+      bridge.stop();
+
+      expect(ws.listenerCount('message')).toBe(0);
+      expect(ws.listenerCount('close')).toBe(0);
+      expect(ws.listenerCount('error')).toBe(0);
+    });
+
+    it('does not receive messages after stop', () => {
+      bridge.start();
+      ws.sent = [];
+
+      bridge.stop();
+      // Simulate a message arriving after stop — should be silently ignored
+      ws.emit('message', Buffer.from(JSON.stringify({ type: 'c2s:ping', timestamp: '2025-01-01' })));
+      expect(ws.sent).toHaveLength(0);
+    });
   });
 
   // -------------------------------------------------------------------------
