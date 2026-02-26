@@ -48,3 +48,6 @@ skills-lock.json
 # OS
 Thumbs.db
 /.stoneforge/
+
+# Node.js heap snapshots (debugging artifacts)
+*.heapsnapshot
