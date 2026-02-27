@@ -779,6 +779,70 @@ describe('SubprocessEngine tool support', () => {
       expect(completed.answer).toContain('Orphan result');
     });
   });
+
+  describe('extractPrompt with system messages', () => {
+    it('includes dynamic system messages (e.g. recalled memories) in conversation history', async () => {
+      const engine = new SubprocessEngine({
+        id: 'echo-sys-msg',
+        name: 'Echo System Message',
+        command: 'echo',
+        promptMode: 'arg',
+        timeout: 5000,
+      });
+
+      const job: Job = {
+        sessionId: 'test',
+        messages: [
+          {
+            role: 'system',
+            content: 'Relevant memories from previous conversations:\n1. User likes TypeScript.',
+          },
+          { role: 'user', content: 'What do you remember about me?' },
+        ],
+        tools: SAMPLE_TOOLS,
+      };
+
+      const handle = await engine.startRun(job);
+      const events = await collectEvents(handle);
+
+      const completed = events.find((e) => e.type === 'completed') as
+        Extract<EngineEvent, { type: 'completed' }>;
+
+      // System messages should be included as [Context] in conversation_history.
+      expect(completed.answer).toContain('conversation_history');
+      expect(completed.answer).toContain('[Context]');
+      expect(completed.answer).toContain('User likes TypeScript');
+      expect(completed.answer).toContain('What do you remember about me');
+    });
+
+    it('takes simple path when only a single user message and no system messages', async () => {
+      const engine = new SubprocessEngine({
+        id: 'echo-simple',
+        name: 'Echo Simple',
+        command: 'echo',
+        promptMode: 'arg',
+        timeout: 5000,
+      });
+
+      const job: Job = {
+        sessionId: 'test',
+        messages: [
+          { role: 'user', content: 'Hello' },
+        ],
+        tools: SAMPLE_TOOLS,
+      };
+
+      const handle = await engine.startRun(job);
+      const events = await collectEvents(handle);
+
+      const completed = events.find((e) => e.type === 'completed') as
+        Extract<EngineEvent, { type: 'completed' }>;
+
+      // Simple path: no conversation_history wrapper.
+      expect(completed.answer).not.toContain('conversation_history');
+      expect(completed.answer).toContain('Hello');
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

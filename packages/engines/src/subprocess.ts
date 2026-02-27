@@ -559,9 +559,14 @@ export class SubprocessEngine implements IEngine {
   private extractPrompt(job: Job): string {
     const userMessages = job.messages.filter((m) => m.role === 'user');
     const hasToolMessages = job.messages.some((m) => m.role === 'tool');
+    // Dynamic system messages (e.g. auto-recalled memories) are injected into
+    // job.messages at runtime.  The static system prompt is passed separately
+    // via --system-prompt flag and is NOT in job.messages.  We must include
+    // these dynamic system messages in the conversation context.
+    const hasSystemMessages = job.messages.some((m) => m.role === 'system');
 
-    // Simple case: single user message with no tool history.
-    if (userMessages.length <= 1 && !hasToolMessages) {
+    // Simple case: single user message with no tool history or injected context.
+    if (userMessages.length <= 1 && !hasToolMessages && !hasSystemMessages) {
       const msg = userMessages[0];
       if (!msg) return '';
       return this.extractMessageText(msg);
@@ -573,6 +578,16 @@ export class SubprocessEngine implements IEngine {
 
     for (const msg of job.messages) {
       switch (msg.role) {
+        case 'system': {
+          // Dynamic system messages (e.g. recalled memories from auto-memory
+          // hooks).  The static system prompt is passed via --system-prompt
+          // flag and does not appear in job.messages.
+          const text = this.extractMessageText(msg);
+          if (text) {
+            parts.push(`[Context]: ${text}`);
+          }
+          break;
+        }
         case 'user':
         case 'assistant': {
           const text = this.extractMessageText(msg);
@@ -594,7 +609,6 @@ export class SubprocessEngine implements IEngine {
           parts.push(`[Tool Result${toolName ? ` (${toolName})` : ''}]: ${content}`);
           break;
         }
-        // 'system' role is handled via --system-prompt flag.
       }
     }
 
