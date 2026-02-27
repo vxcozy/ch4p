@@ -1,34 +1,64 @@
 # Explanation: Architecture
 
-This document explains why ch4p is structured the way it is. It covers the Gateway + Agent + Engine pattern, the choice of TypeScript, and the research that informed its design.
+This document explains why ch4p is structured the way it is. It covers the six-layer stack, the choice of TypeScript, and the research that informed its design.
 
 ---
 
-## The Three-Layer Pattern
+## The Six-Layer Stack
 
-ch4p separates concerns into three distinct layers:
+ch4p separates concerns into six layers. Each layer has a single job, talks only to its immediate neighbors, and can be swapped without disturbing the rest of the stack.
 
 ```
-Channels (CLI, Telegram, Discord, ...)     Canvas (tldraw, WebSocket, A2UI)
-    |                                           |
-Gateway (HTTP server, session routing)   Gateway (WS upgrade, static files)
-    |                                           |
-Agent Runtime (session, context, steering, canvas_render tool)
-    |
-Engine (native LLM, echo, CLI subprocess)
-    |
-Provider (Anthropic, OpenAI, Google/Gemini, OpenRouter, Ollama, Bedrock)
-    |
-Tools / Memory / Security
+┌─────────────────────────────────────────────────────────────────┐
+│  Channels (CLI, Telegram, Discord, …)   Canvas (tldraw, A2UI)  │  ← Surface
+├─────────────────────────────────────────────────────────────────┤
+│  Gateway (HTTP server, WS upgrade, session routing)             │  ← Routing
+├─────────────────────────────────────────────────────────────────┤
+│  Agent Runtime (session, context, steering, tool dispatch)      │  ← Orchestration
+├─────────────────────────────────────────────────────────────────┤
+│  Engine (native LLM, echo, CLI subprocess)                      │  ← LLM abstraction
+├─────────────────────────────────────────────────────────────────┤
+│  Provider (Anthropic, OpenAI, Google/Gemini, OpenRouter, …)     │  ← LLM transport
+├─────────────────────────────────────────────────────────────────┤
+│  Tools / Memory / Security                                      │  ← Capabilities
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-**Gateway** handles the outside world. It manages connections to messaging platforms, normalizes incoming messages into a common format, and routes outgoing responses back to the right channel. The gateway knows nothing about LLMs, tools, or memory. Its only job is I/O with the external world.
+### Channels (Surface)
 
-**Agent** is the orchestration layer. It receives normalized messages from the gateway, decides what to do (respond, use a tool, store a memory), manages the conversation loop, and enforces security boundaries. The agent is the only component that coordinates between all the others.
+Channels are the user-facing endpoints. Each channel implements the IChannel interface: receive messages from a platform, normalize them into a common InboundMessage format, and send responses back. The CLI terminal, Telegram, Discord, Slack, Matrix, and 12 other adapters all sit here. So does the Canvas, which translates spatial interactions (button clicks, form submissions) into the same message format.
 
-**Engine** is the LLM abstraction. It takes a conversation and returns a completion. It knows nothing about channels, tools, or memory. The agent feeds it context and interprets its output.
+Channels know nothing about LLMs, tools, or memory. They convert platform-specific I/O into a common shape and hand it to the gateway.
 
-This separation exists for a practical reason: each layer changes at a different rate and for different reasons. Messaging platform APIs change frequently. LLM provider APIs evolve rapidly. Security requirements shift with context. By keeping them isolated behind interfaces, any layer can change without rippling through the others.
+### Gateway (Routing)
+
+The gateway is the HTTP and WebSocket server that sits between channels and the agent runtime. It manages connections to messaging platforms, maps incoming messages to sessions, and routes outgoing responses back to the right channel. It also serves static files for the canvas web UI and handles WebSocket upgrades for real-time streaming.
+
+The gateway knows nothing about LLMs, tools, or memory. Its only job is I/O routing and session management.
+
+### Agent Runtime (Orchestration)
+
+The agent is the only layer that talks to everything else. It receives normalized messages from the gateway, decides what to do (respond, call a tool, store a memory), manages the conversation loop, enforces security boundaries, and coordinates verification. The agent loop runs tools, feeds results back into context, and repeats until the task is done or a limit is hit.
+
+### Engine (LLM Abstraction)
+
+The engine takes a conversation and returns a completion. It knows nothing about channels, tools, or memory. The agent feeds it context and interprets its output. Three engine implementations exist: NativeEngine (direct API calls via a provider), SubprocessEngine (spawns `claude --print` as a child process), and EchoEngine (deterministic responses for testing).
+
+### Provider (LLM Transport)
+
+Providers handle the HTTP transport to a specific LLM vendor. Each implements the IProvider interface with `chatCompletion()` and `streamCompletion()` methods. Anthropic, OpenAI, Google/Gemini, OpenRouter, Ollama, and AWS Bedrock are supported. The engine picks a provider; the provider handles auth, request formatting, and response parsing for that vendor's API.
+
+Separating Engine from Provider means the agent can switch between "run Claude natively" and "run Claude through a subprocess" without touching any provider code, and a provider can update its API handling without affecting how the engine manages conversations.
+
+### Tools / Memory / Security (Capabilities)
+
+The bottom layer provides everything the agent can *do* beyond generating text. Tools implement the ITool interface (bash, file operations, web search, browser, MCP bridges, canvas rendering, delegation). Memory provides hybrid search over past conversations (SQLite FTS5 + vector embeddings). Security enforces filesystem scoping, command allowlisting, output sanitization, and the autonomy level system.
+
+These capabilities are registered with the agent at startup and dispatched through the tool execution pipeline, which handles validation, state snapshots, and result sanitization.
+
+### Why six layers?
+
+Each layer changes at a different rate and for different reasons. Messaging platform APIs change frequently. LLM provider APIs evolve rapidly. Security requirements shift with context. Tool implementations grow as new capabilities are added. By keeping them isolated behind interfaces, any layer can change without rippling through the others.
 
 ---
 
