@@ -649,43 +649,66 @@ export async function gateway(args: string[]): Promise<void> {
         continue;
       }
 
-      try {
-        await channel.start(channelCfg);
-        channelRegistry.register(channel);
-        startedChannels.push(channel);
+      // Retry initial channel connection up to 3 times with exponential backoff.
+      // Transient network issues (DNS, TCP timeouts) shouldn't permanently
+      // disable a channel — especially after an OOM-triggered restart.
+      const MAX_START_RETRIES = 3;
+      let started = false;
+      for (let attempt = 1; attempt <= MAX_START_RETRIES; attempt++) {
+        try {
+          await channel.start(channelCfg);
+          started = true;
+          break;
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          if (attempt < MAX_START_RETRIES) {
+            const delayMs = 1000 * Math.pow(2, attempt - 1); // 1s, 2s, 4s
+            console.log(`    ${YELLOW}⚠${RESET} ${channelName}: ${errMsg} ${DIM}(retry ${attempt}/${MAX_START_RETRIES} in ${delayMs / 1000}s)${RESET}`);
+            await new Promise((r) => setTimeout(r, delayMs));
+          } else {
+            console.log(`    ${RED}✗${RESET} ${channelName}: ${errMsg} ${DIM}(failed after ${MAX_START_RETRIES} attempts)${RESET}`);
+          }
+        }
+      }
 
-        // Wire inbound messages: channel → voice → messageRouter → AgentLoop → channel.send()
-        channel.onMessage((msg: InboundMessage) => {
-          handleInboundMessage({
-            msg, channel, router: messageRouter, engine, config, observer,
-            conversationContexts, agentRouter, defaultSystemPrompt,
-            memoryBackend, skillRegistry, voiceProcessor, onInflightChange: trackInflight,
-            workerPool, inFlightLoops, pendingMessages, sharedVerifier, sessionNotes,
-          });
+      if (!started) continue;
+
+      channelRegistry.register(channel);
+      startedChannels.push(channel);
+
+      // Wire inbound messages: channel → voice → messageRouter → AgentLoop → channel.send()
+      channel.onMessage((msg: InboundMessage) => {
+        handleInboundMessage({
+          msg, channel, router: messageRouter, engine, config, observer,
+          conversationContexts, agentRouter, defaultSystemPrompt,
+          memoryBackend, skillRegistry, voiceProcessor, onInflightChange: trackInflight,
+          workerPool, inFlightLoops, pendingMessages, sharedVerifier, sessionNotes,
         });
+      });
 
-        // Register raw webhook handlers for channels that receive structured
-        // webhook payloads (Teams Bot Framework activities, Google Chat events).
-        if (channelName === 'teams' && 'handleIncomingActivity' in channel) {
-          rawWebhookHandlers.set('teams', (body: string) => {
-            try {
-              const activity = JSON.parse(body);
-              (channel as TeamsChannel).handleIncomingActivity(activity);
-            } catch { /* malformed payload — silently drop */ }
-          });
-        }
-        if (channelName === 'googlechat' && 'handleIncomingEvent' in channel) {
-          rawWebhookHandlers.set('googlechat', (body: string) => {
-            try {
-              const event = JSON.parse(body);
-              (channel as GoogleChatChannel).handleIncomingEvent(event);
-            } catch { /* malformed payload — silently drop */ }
-          });
-        }
+      // Register raw webhook handlers for channels that receive structured
+      // webhook payloads (Teams Bot Framework activities, Google Chat events).
+      if (channelName === 'teams' && 'handleIncomingActivity' in channel) {
+        rawWebhookHandlers.set('teams', (body: string) => {
+          try {
+            const activity = JSON.parse(body);
+            (channel as TeamsChannel).handleIncomingActivity(activity);
+          } catch { /* malformed payload — silently drop */ }
+        });
+      }
+      if (channelName === 'googlechat' && 'handleIncomingEvent' in channel) {
+        rawWebhookHandlers.set('googlechat', (body: string) => {
+          try {
+            const event = JSON.parse(body);
+            (channel as GoogleChatChannel).handleIncomingEvent(event);
+          } catch { /* malformed payload — silently drop */ }
+        });
+      }
 
-        // Register with supervisor for crash recovery. The channel is already
-        // started, so start() is a no-op reconnect and shutdown() calls stop().
-        let alive = true;
+      // Register with supervisor for crash recovery. The channel is already
+      // started, so start() is a no-op reconnect and shutdown() calls stop().
+      let alive = true;
+      try {
         await channelSupervisor.addChild({
           id: channelName,
           start: async () => {
@@ -705,12 +728,11 @@ export async function gateway(args: string[]): Promise<void> {
             await channel.stop();
           },
         });
-
-        console.log(`    ${GREEN}✓${RESET} ${channelName} ${DIM}(${channel.name})${RESET}`);
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        console.log(`    ${RED}✗${RESET} ${channelName}: ${errMsg}`);
+      } catch {
+        // Supervisor registration is best-effort; channel still works without crash recovery.
       }
+
+      console.log(`    ${GREEN}✓${RESET} ${channelName} ${DIM}(${channel.name})${RESET}`);
     }
 
     await channelSupervisor.start();
@@ -871,16 +893,25 @@ export async function gateway(args: string[]): Promise<void> {
     messageRouter.evictStale();
     server.evictIdleCanvas(contextIdleMs);
 
-    // Nudge the GC when heap is elevated so freed contexts are collected promptly
-    // rather than waiting for allocation pressure to trigger a major GC.
+    // Nudge the GC so the heap measurement reflects actual retained memory,
+    // not uncollected garbage.  Without this, V8's lazy GC shows a slow
+    // creep at idle that isn't a real leak — just deferred collection.
     // Only available when Node is started with --expose-gc.
-    if (heapMB > 500 && typeof (globalThis as { gc?: () => void }).gc === 'function') {
-      (globalThis as { gc?: () => void }).gc!();
-    }
+    const gc = (globalThis as { gc?: () => void }).gc;
+    if (gc) gc();
+
+    // Re-read heap after GC for accurate measurement.
+    const postGC = process.memoryUsage();
+    const postHeapMB = Math.round(postGC.heapUsed / 1024 / 1024);
+    const postRssMB = Math.round(postGC.rss / 1024 / 1024);
 
     // Log heap usage and context count for diagnostics.
+    // Include external + arrayBuffers to detect Buffer/native memory leaks
+    // (these are outside V8 heap but inside RSS).
+    const extMB = Math.round(postGC.external / 1024 / 1024);
+    const bufMB = Math.round((postGC.arrayBuffers ?? 0) / 1024 / 1024);
     console.log(
-      `  ${DIM}[eviction] heap=${heapMB}MB rss=${rssMB}MB contexts=${conversationContexts.size} sessions=${sessionManager.size}${RESET}`,
+      `  ${DIM}[eviction] heap=${postHeapMB}MB ext=${extMB}MB buf=${bufMB}MB rss=${postRssMB}MB contexts=${conversationContexts.size} sessions=${sessionManager.size}${RESET}`,
     );
 
     // Warn at elevated heap levels.  Do NOT call v8.writeHeapSnapshot() here —
@@ -888,12 +919,12 @@ export async function gateway(args: string[]): Promise<void> {
     // process that is already under pressure.  Use the Node flag
     // --heapsnapshot-near-heap-limit=1 at startup instead; it writes a snapshot
     // via a separate OOM handler that does not allocate on the main heap.
-    if (heapMB > 1500) {
+    if (postHeapMB > 1500) {
       console.log(
-        `  ${YELLOW}[OOM warning]${RESET} Heap at ${heapMB}MB — restart the gateway or set NODE_OPTIONS=--max-old-space-size=512`,
+        `  ${YELLOW}[OOM warning]${RESET} Heap at ${postHeapMB}MB — restart the gateway or set NODE_OPTIONS=--max-old-space-size=512`,
       );
-    } else if (heapMB > 500) {
-      console.log(`  ${DIM}[mem pressure]${RESET} Heap at ${heapMB}MB — evicting with 5 min idle window${RESET}`);
+    } else if (postHeapMB > 500) {
+      console.log(`  ${DIM}[mem pressure]${RESET} Heap at ${postHeapMB}MB — evicting with 5 min idle window${RESET}`);
     }
   }, 5 * 60_000);
 
@@ -1000,13 +1031,16 @@ class RateLimiter {
     return true;
   }
 
-  /** Remove keys whose timestamps have all expired. */
+  /** Remove expired timestamps from all keys; delete keys that are fully expired. */
   evictStale(): void {
     const now = Date.now();
     const cutoff = now - this.windowMs;
     for (const [key, timestamps] of this.windows) {
-      if (timestamps.every((t) => t <= cutoff)) {
+      const filtered = timestamps.filter((t) => t > cutoff);
+      if (filtered.length === 0) {
         this.windows.delete(key);
+      } else if (filtered.length < timestamps.length) {
+        this.windows.set(key, filtered);
       }
     }
   }

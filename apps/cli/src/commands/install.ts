@@ -123,6 +123,8 @@ ${programArgsXml}
 \t\t<string>${homedir()}</string>
 \t\t<key>PATH</key>
 \t\t<string>${homedir()}/.local/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+\t\t<key>NODE_OPTIONS</key>
+\t\t<string>--max-old-space-size=512 --heapsnapshot-near-heap-limit=1 --expose-gc</string>
 \t</dict>
 
 \t<key>WorkingDirectory</key>
@@ -282,6 +284,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 ${envFileLine}Environment=HOME=${homedir()}
+Environment=NODE_OPTIONS=--max-old-space-size=512 --heapsnapshot-near-heap-limit=1 --expose-gc
 WorkingDirectory=${ch4pDir}
 ${execStart}
 Restart=on-failure

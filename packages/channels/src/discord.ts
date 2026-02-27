@@ -136,6 +136,8 @@ export class DiscordChannel implements IChannel {
   private allowedUsers: Set<string> = new Set();
   private streamMode: 'off' | 'edit' | 'block' = 'off';
   private reconnectAttempts = 0;
+  private reconnectScheduled = false;
+  private connectionTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private lastEditTimestamps = new Map<string, number>();
   private static readonly EDIT_TS_MAX_ENTRIES = 500;
 
@@ -168,13 +170,20 @@ export class DiscordChannel implements IChannel {
 
   async stop(): Promise<void> {
     this.running = false;
+    this.reconnectScheduled = true; // prevent any pending close handler from reconnecting
 
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
 
+    if (this.connectionTimeoutTimer) {
+      clearTimeout(this.connectionTimeoutTimer);
+      this.connectionTimeoutTimer = null;
+    }
+
     if (this.ws) {
+      this.ws.removeAllListeners();
       try {
         this.ws.close(1000, 'Shutting down');
       } catch {
@@ -290,8 +299,17 @@ export class DiscordChannel implements IChannel {
 
     return new Promise<void>((resolve, reject) => {
       this.ws = new WebSocket(url);
+      this.reconnectScheduled = false;
 
       let identified = false;
+
+      const settled = () => {
+        // Clear the connection timeout once the promise settles.
+        if (this.connectionTimeoutTimer) {
+          clearTimeout(this.connectionTimeoutTimer);
+          this.connectionTimeoutTimer = null;
+        }
+      };
 
       this.ws.on('message', (data: Buffer) => {
         try {
@@ -377,6 +395,7 @@ export class DiscordChannel implements IChannel {
                 this.reconnectAttempts = 0;
                 if (!identified) {
                   identified = true;
+                  settled();
                   resolve();
                 }
               }
@@ -389,19 +408,25 @@ export class DiscordChannel implements IChannel {
 
       this.ws.on('error', (err: Error) => {
         if (!identified) {
+          settled();
           reject(err);
         }
       });
 
       this.ws.on('close', () => {
-        if (this.running) {
-          // Auto-reconnect with exponential backoff.
+        if (this.running && !this.reconnectScheduled) {
+          // Auto-reconnect only for UNEXPECTED disconnections.
+          // When reconnect() intentionally closes the WS, it removes
+          // all listeners before closing so this handler never fires.
+          // This guard is a safety net for edge cases where the close
+          // event races with removeAllListeners().
           this.reconnect();
         }
       });
 
       // Timeout for initial connection.
-      setTimeout(() => {
+      this.connectionTimeoutTimer = setTimeout(() => {
+        this.connectionTimeoutTimer = null;
         if (!identified) {
           reject(new Error('Discord gateway connection timed out'));
         }
@@ -428,16 +453,29 @@ export class DiscordChannel implements IChannel {
   }
 
   private reconnect(): void {
+    // Guard: if a reconnect is already scheduled, don't schedule another.
+    // This prevents the cascade where reconnect() → ws.close() → 'close' event
+    // → reconnect() creates duplicate connectGateway() calls that orphan WebSocket
+    // connections (each orphan holds TLS state + receives Discord events, leading
+    // to exponential memory growth and eventual OOM).
+    if (this.reconnectScheduled) return;
+    this.reconnectScheduled = true;
+
     this.reconnectAttempts++;
     const delayMs = Math.min(DISCORD_RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempts - 1), DISCORD_RECONNECT_MAX_MS);
     // jitter: ±20%
     const jitter = delayMs * 0.2 * (Math.random() * 2 - 1);
 
     if (this.ws) {
+      // Remove ALL listeners BEFORE closing to prevent the 'close' handler
+      // from calling reconnect() again (double-fire).  The old WS will
+      // complete its TCP close handshake and be GC'd once the kernel
+      // releases the socket.
+      this.ws.removeAllListeners();
       try {
         this.ws.close(4000, 'Reconnecting');
       } catch {
-        // Ignore.
+        // Ignore — may already be closed.
       }
       this.ws = null;
     }
@@ -445,6 +483,12 @@ export class DiscordChannel implements IChannel {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
+    }
+
+    // Clear the connection timeout from any in-progress connectGateway().
+    if (this.connectionTimeoutTimer) {
+      clearTimeout(this.connectionTimeoutTimer);
+      this.connectionTimeoutTimer = null;
     }
 
     if (this.running) {
