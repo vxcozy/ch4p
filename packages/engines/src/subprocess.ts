@@ -786,7 +786,12 @@ export function createClaudeCliEngine(
     // --dangerously-skip-permissions: gateway runs headlessly — no TTY to
     // answer permission prompts. ch4p's own security layer (command allowlist,
     // SSRF guards, path sandbox) handles tool-level defence above this.
-    args: ['--print', '--dangerously-skip-permissions'],
+    //
+    // --tools "": disable Claude Code's built-in tools (Bash, Edit, Read, …)
+    // so the model uses ch4p's <tool_call> XML format instead of the native
+    // tool system.  Without this, Claude Code intercepts tool calls internally
+    // and our custom tools (memory_store, memory_recall, etc.) never execute.
+    args: ['--print', '--dangerously-skip-permissions', '--tools', ''],
     promptMode: 'arg',
     timeout: 600_000, // 10 minutes for complex tasks
     ...overrides,
