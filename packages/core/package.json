@@ -1,6 +1,6 @@
 {
   "name": "@ch4p/core",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Trait interfaces, types, errors, and utilities for the ch4p platform",
   "license": "Apache-2.0",

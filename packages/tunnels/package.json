@@ -1,6 +1,6 @@
 {
   "name": "@ch4p/tunnels",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Public URL tunnel providers — Cloudflare, Tailscale, ngrok",
   "license": "Apache-2.0",

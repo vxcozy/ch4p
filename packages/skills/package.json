@@ -1,6 +1,6 @@
 {
   "name": "@ch4p/skills",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Skill discovery, YAML frontmatter, and OpenClaw-compatible registry",
   "license": "Apache-2.0",
